@@ -11,6 +11,7 @@ use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
+use Spora\Plugins\Typst\Http\TypstImageController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstInspectTool;
 use Spora\Plugins\Typst\Tools\TypstRenderTool;
@@ -64,6 +65,7 @@ final class TypstPlugin extends AbstractPlugin
         $builder->addDefinitions([
             TypstFontController::class    => \DI\autowire(),
             TypstExampleController::class => \DI\autowire(),
+            TypstImageController::class   => \DI\autowire(),
             TypstRenderTool::class        => \DI\autowire(),
             TypstInspectTool::class       => \DI\autowire(),
             TypstResourcesTool::class     => \DI\autowire(),
@@ -94,6 +96,11 @@ final class TypstPlugin extends AbstractPlugin
         $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], $auth);
         $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], $auth);
         $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], $auth);
+
+        // Images — the row's `id` (not basename) is the addressable key.
+        $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], $auth);
+        $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], $auth);
+        $r->addRoute('DELETE', '/api/v1/typst/images/{id}', [TypstImageController::class, 'destroy'], $auth);
     }
 
     /**

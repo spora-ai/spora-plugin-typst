@@ -124,6 +124,36 @@ All routes sit behind `AuthMiddleware` + `CsrfMiddleware`.
 Listing returns the union (deduplicated by basename, tier-2 first).
 Reads consult tier-2 first, then tier-1.
 
+## Image library
+
+The plugin also ships a **per-principal image library** — agents can
+upload PNG / JPEG / WebP / SVG and reference them in Typst source via
+`#image("…/api/v1/assets/<uuid>.png")`. Each image is a real
+`media_assets` row tagged with `plugin_slug='spora-plugin-typst'` and
+`tool_name='typst.image'`, so it shows up in the media library's LIST
+endpoint and the Media Archive plugin's Versions UI when that plugin is
+also installed.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/typst/images` | List images visible to the caller (principal-scoped) |
+| `POST` | `/api/v1/typst/images` | Upload an image (`{ filename, mime, content }` — content is base64 or raw UTF-8 for SVG) |
+| `DELETE` | `/api/v1/typst/images/{id}` | Delete an image by id (404 if not found or owned by another principal) |
+
+Images are capped at `TypstImageStore::MAX_BYTES` (5 MiB) per upload and
+limited to the four MIMEs ext-typst can `#image()` natively. The
+controller uses the host's `AssetStore` to persist bytes, so storage
+mode (`data_url` vs `local`) follows the operator's existing
+configuration.
+
+### Architectural distinction
+
+Fonts and examples are plugin-private files (raw bytes, no `media_assets`
+row, no canonical asset URL). Images are full `media_assets` rows with a
+canonical `/api/v1/assets/<uuid>.<ext>` URL the chat UI can resolve.
+That difference is why fonts/examples use a basename-keyed storage path
+while images use the `media_assets.id` UUID as the addressable key.
+
 ## Local development
 
 In `spora-local`, add the plugin as a path repo to test it against the
