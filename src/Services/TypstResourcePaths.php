@@ -43,7 +43,11 @@ final class TypstResourcePaths
 
     public function __construct(
         private readonly Paths $paths,
-        private readonly int $principalId,
+        // `?int` — null means "no principal scope" (used by the world
+        // factory's DI path, where PHP-DI autowires a singleton at
+        // boot before any request has resolved a principal). Per-
+        // request callers (HTTP controllers) always pass an int.
+        private readonly ?int $principalId = null,
     ) {}
 
     /**
@@ -68,11 +72,17 @@ final class TypstResourcePaths
 
     public function principalFontDirectory(): string
     {
+        if ($this->principalId === null) {
+            throw new RuntimeException('TypstResourcePaths::principalFontDirectory() called without a principal scope');
+        }
         return $this->paths->storage('typst/fonts') . '/' . $this->principalId;
     }
 
     public function principalExampleDirectory(): string
     {
+        if ($this->principalId === null) {
+            throw new RuntimeException('TypstResourcePaths::principalExampleDirectory() called without a principal scope');
+        }
         return $this->paths->storage('typst/examples') . '/' . $this->principalId;
     }
 
@@ -177,6 +187,8 @@ final class TypstResourcePaths
                 ? $this->skillFontDirectory()
                 : $this->skillExampleDirectory();
         }
+        // Tier-2 paths need a principal scope; the world factory
+        // (no principal) never calls into tier-2.
         return $kind === self::KIND_FONT
             ? $this->principalFontDirectory()
             : $this->principalExampleDirectory();

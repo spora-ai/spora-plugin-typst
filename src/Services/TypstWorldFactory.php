@@ -84,10 +84,16 @@ final class TypstWorldFactory
         if ($this->resolvedFontDirs !== []) {
             return $this->resolvedFontDirs;
         }
-        $candidates = [
-            $this->paths->skillFontDirectory(),
-            $this->paths->principalFontDirectory(),
-        ];
+        // Tier-1 (skill-shipped) is always available; tier-2 is
+        // principal-scoped and skipped when the world factory was
+        // built without a principal (PHP-DI autowire path).
+        $candidates = [$this->paths->skillFontDirectory()];
+        try {
+            $candidates[] = $this->paths->principalFontDirectory();
+        } catch (RuntimeException $e) {
+            // No principal scope — that's fine, the operator
+            // simply hasn't uploaded any principal-tier fonts yet.
+        }
         $out = [];
         foreach ($candidates as $dir) {
             $real = realpath($dir);
@@ -102,9 +108,8 @@ final class TypstWorldFactory
         }
         if ($out === []) {
             throw new RuntimeException(sprintf(
-                'TypstWorldFactory: no font directories are readable (skill="%s", principal="%s")',
+                'TypstWorldFactory: no font directories are readable (skill="%s")',
                 $this->paths->skillFontDirectory(),
-                $this->paths->principalFontDirectory(),
             ));
         }
         $this->resolvedFontDirs = $out;
