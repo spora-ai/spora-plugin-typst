@@ -7,7 +7,7 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 ## What's in the box
 
 - 3 LLM-callable tools: `typst_render`, `typst_inspect`, `typst_resources`.
-- 6 REST routes under `/api/v1/typst/{fonts,examples}*`.
+- 7 REST routes under `/api/v1/typst/{fonts,examples,images,compile}*`.
 - 1 admin app (`/apps/typst`) — manage fonts and example templates.
 - 1 agent template (`typst-assistant`).
 - The `typst` skill body — covers the workflow, syntax primer, and limit checklist.
@@ -146,6 +146,59 @@ controller uses the host's `AssetStore` to persist bytes, so storage
 mode (`data_url` vs `local`) follows the operator's existing
 configuration.
 
+## Playground compile
+
+The `/apps/typst` admin panel ships a Playground tab where the operator
+can paste Typst source and click "Compile" to get a rendered PDF / PNG /
+SVG. The compile flow is exposed as:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, format, page, dpi }`) |
+
+The endpoint mirrors `TypstRenderTool`'s agent path: it materialises an
+inline `text/x-typst` parent row so the natural-key on `media_derivatives`
+is well-defined, runs the same `TypstRenderProducer`, persists through
+`MediaDerivativeService::create()`, and returns the canonical asset URL.
+For PDF it also produces a first-page PNG sibling so the UI can render
+an inline preview without a second round-trip.
+
+The response shape:
+
+```json
+{
+  "data": {
+    "derivative_id": "01HXYZ...",
+    "asset_url": "/api/v1/assets/01HXYZ....pdf",
+    "format": "pdf",
+    "mime": "application/pdf",
+    "size": 12345,
+    "width": null,
+    "height": null,
+    "preview_url": "/api/v1/assets/01HABC....png"
+  }
+}
+```
+
+Permission model: `POST /api/v1/typst/compile` is scoped to the
+caller's user-principal (no `?principal_id=N`). The derivative row
+inherits the parent principal automatically; PDFs and PNGs both end up
+in the caller's own media pool.
+
+### URL convention
+
+The asset_url returned by both the compile endpoint and the image
+library is the canonical media-archive URL `/api/v1/assets/<uuid>.<ext>`.
+In Typst source, reference it directly via `#image()`:
+
+```typst
+#image("/api/v1/assets/01HXYZ....png", width: 80%)
+```
+
+The production SPA serves these URLs from core's `AssetController` (no
+plugin-specific route is needed), so the same URL works inside Typst
+source, in chat markdown, and in the admin gallery.
+
 ### Architectural distinction
 
 Fonts and examples are plugin-private files (raw bytes, no `media_assets`
@@ -189,7 +242,9 @@ plugin loader automatically.
 │   │   └── TypstCompilationException.php
 │   ├── Http/
 │   │   ├── TypstFontController.php    # GET/POST/DELETE /api/v1/typst/fonts
-│   │   └── TypstExampleController.php # GET/POST/DELETE /api/v1/typst/examples
+│   │   ├── TypstExampleController.php # GET/POST/DELETE /api/v1/typst/examples
+│   │   ├── TypstImageController.php   # GET/POST/DELETE /api/v1/typst/images
+│   │   └── TypstCompileController.php # POST /api/v1/typst/compile
 │   ├── Producers/
 │   │   └── TypstRenderProducer.php    # MediaDerivativeProducerInterface impl
 │   ├── Services/

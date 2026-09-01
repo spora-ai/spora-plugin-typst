@@ -9,6 +9,7 @@ use Spora\Core\MiddlewareRouteCollector;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
+use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
 use Spora\Plugins\Typst\Http\TypstImageController;
@@ -22,12 +23,13 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  * Plugin entry point for `spora-plugin-typst`.
  *
  * Contributes one admin app (TypstApp), three LLM-callable tools
- * (`typst_render`, `typst_inspect`, `typst_resources`), six REST
- * routes under `/api/v1/typst/{fonts,examples}*`, the
- * `TypstRenderProducer` (registered with the media-derivatives
- * discovery registry), DI bindings for the controllers and tools,
- * the `skills/typst/` directory (Inter OFL fonts + a starter
- * invoice example), and the `typst-assistant` agent template.
+ * (`typst_render`, `typst_inspect`, `typst_resources`), seven REST
+ * routes under `/api/v1/typst/{fonts,examples,images}*` plus
+ * `POST /api/v1/typst/compile`, the `TypstRenderProducer`
+ * (registered with the media-derivatives discovery registry), DI
+ * bindings for the controllers and tools, the `skills/typst/`
+ * directory (Inter OFL fonts + a starter invoice example), and the
+ * `typst-assistant` agent template.
  *
  * Architectural invariants:
  *
@@ -66,6 +68,7 @@ final class TypstPlugin extends AbstractPlugin
             TypstFontController::class    => \DI\autowire(),
             TypstExampleController::class => \DI\autowire(),
             TypstImageController::class   => \DI\autowire(),
+            TypstCompileController::class => \DI\autowire(),
             TypstRenderTool::class        => \DI\autowire(),
             TypstInspectTool::class       => \DI\autowire(),
             TypstResourcesTool::class     => \DI\autowire(),
@@ -77,7 +80,7 @@ final class TypstPlugin extends AbstractPlugin
     }
 
     /**
-     * Register the six `/api/v1/typst/*` routes behind Auth + CSRF.
+     * Register the seven `/api/v1/typst/*` routes behind Auth + CSRF.
      * Mirrors the spora-plugin-memories auth chain verbatim so the
      * admin UI's fetch() calls Just Work.
      */
@@ -101,6 +104,9 @@ final class TypstPlugin extends AbstractPlugin
         $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], $auth);
         $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], $auth);
         $r->addRoute('DELETE', '/api/v1/typst/images/{id}', [TypstImageController::class, 'destroy'], $auth);
+
+        // Playground — compile inline Typst source to PDF/PNG/SVG.
+        $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], $auth);
     }
 
     /**

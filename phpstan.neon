@@ -17,3 +17,7 @@ parameters:
         # properties PHPStan can't statically infer. Matches the
         # same pattern spora-core uses for its own Pest suite.
         - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
+        # Pest's `expect()` chains `->not->toX()` against a typed
+        # Expectation. PHPStan can't statically prove `->not`
+        # resolves on every chain target.
+        - '#Access to an undefined property Pest\\Mixins\\Expectation#'
