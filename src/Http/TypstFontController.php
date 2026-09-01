@@ -39,10 +39,30 @@ final class TypstFontController
 
     /**
      * GET /api/v1/typst/fonts
+     *
+     * Optional `?principal_id=N` lets the caller scope the listing
+     * to any principal they can see (their own user-principal + the
+     * group-principals they're a member of). Omitting the param
+     * preserves the caller's own-principal default for backward
+     * compatibility with the v1 clients.
+     *
+     * Skill-shipped fonts (tier-1, plugin-bundled Inter OFL) are
+     * always included regardless of the requested principal — the
+     * `TypstResourceStore::list()` union already mixes tier-1 and
+     * tier-2 (deduplicated, tier-2 wins on basename collision).
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
+        $userId = $this->auth->currentUserId();
+        if ($userId === null || $userId <= 0) {
+            throw new RuntimeException('Authentication required');
+        }
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
+        $store = $this->storeForPrincipal($principalId);
 
         return new JsonResponse([
             'data' => [
@@ -139,6 +159,40 @@ final class TypstFontController
         $principalId = $this->principals->ensureUserPrincipal($userId)->id;
         $paths = new TypstResourcePaths($this->paths(), $principalId);
         return new TypstResourceStore($paths);
+    }
+
+    /**
+     * Build a store scoped to a specific principal id (used by the
+     * GET endpoint when `?principal_id=N` is supplied). The principal
+     * id is treated as a public id — the caller has already passed
+     * the visibility check in {@see resolvePrincipalId()}.
+     */
+    private function storeForPrincipal(int $principalId): TypstResourceStore
+    {
+        $paths = new TypstResourcePaths($this->paths(), $principalId);
+        return new TypstResourceStore($paths);
+    }
+
+    /**
+     * Resolve the principal id from `?principal_id=N`, falling back to
+     * the caller's own user-principal. Validates the requested id is
+     * in `visiblePrincipalIds` for the caller — throws a sentinel
+     * `RuntimeException` if not, so a probe can't enumerate principals
+     * the operator can't see. The controller catches the sentinel and
+     * surfaces a 404 envelope (matches the existing pattern in
+     * `destroy()` which catches `RuntimeException` from the store).
+     */
+    private function resolvePrincipalId(Request $request, int $userId): int
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested === null || $requested === '') {
+            return $this->principals->ensureUserPrincipal($userId)->id;
+        }
+        $requestedId = (int) $requested;
+        if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+            throw new RuntimeException('Principal not visible to caller');
+        }
+        return $requestedId;
     }
 
     private function paths(): \Spora\Core\Paths

@@ -28,7 +28,7 @@ beforeEach(function () {
 });
 
 it('GET /typst/images returns an empty list when no images are uploaded', function () {
-    $resp = $this->controller->index();
+    $resp = $this->controller->index(Request::create("/api/v1/typst/images", "GET"));
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['images'])->toBe([]);
@@ -112,7 +112,7 @@ it('GET /typst/images lists previously uploaded images', function () {
     $this->store->create('x', 'image/png', ['principal_id' => $principalId, 'filename' => 'one.png']);
     $this->store->create('x', 'image/png', ['principal_id' => $principalId, 'filename' => 'two.png']);
 
-    $resp = $this->controller->index();
+    $resp = $this->controller->index(Request::create("/api/v1/typst/images", "GET"));
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['images'])->toHaveCount(2);
 });
@@ -158,4 +158,34 @@ it('POST /typst/images sanitises filenames with path separators', function () {
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['image']['filename'])->not->toContain('/');
     expect($body['data']['image']['filename'])->not->toContain('..');
+});
+
+it('GET /typst/images with ?principal_id=99 returns 404 (principal not visible)', function () {
+    $req = Request::create('/api/v1/typst/images?principal_id=99', 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(404);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('NOT_FOUND');
+});
+
+it('GET /typst/images without ?principal_id falls back to the caller\'s principal', function () {
+    // Seed one image under the caller's principal and one under a
+    // different principal; only the caller's image should surface.
+    $callerPrincipalId = $this->principalService->ensureUserPrincipal(
+        $this->auth->currentUserId(),
+    )->id;
+    Illuminate\Database\Capsule\Manager::table('principals')->insert([
+        ['id' => $callerPrincipalId + 100, 'type' => 'user', 'user_id' => null, 'group_id' => null, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
+    ]);
+    $otherPrincipalId = $callerPrincipalId + 100;
+
+    $this->store->create('x', 'image/png', ['principal_id' => $callerPrincipalId, 'filename' => 'mine.png']);
+    $this->store->create('x', 'image/png', ['principal_id' => $otherPrincipalId, 'filename' => 'theirs.png']);
+
+    $req = Request::create('/api/v1/typst/images', 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['images'])->toHaveCount(1);
+    expect($body['data']['images'][0]['filename'])->toBe('mine.png');
 });

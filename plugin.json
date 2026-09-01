@@ -4,7 +4,7 @@
     "slug": "typst",
     "description": "Compile Typst source to PDF/PNG/SVG via ext-typst; ships Inter OFL fonts and a writable per-principal example store.",
     "class": "Spora\\Plugins\\Typst\\TypstPlugin",
-    "icon": "file-type-2",
+    "icon": "pilcrow",
     "autoload": {
         "psr-4": {
             "Spora\\Plugins\\Typst\\": "src/"

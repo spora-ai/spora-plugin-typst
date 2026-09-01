@@ -32,9 +32,11 @@ final class TypstApp implements VueAppInterface
 
     public function icon(): string
     {
-        // `file-type-2` is in the bundled icon palette (see
-        // spora-core/docs/07_plugins.md § Bundled icons).
-        return 'file-type-2';
+        // `pilcrow` — the typographic paragraph mark (¶). The
+        // canonical "this is about typography/typesetting" signal;
+        // matches the spirit of memories/brain (semantic glyph)
+        // and media-archive/image (content-type glyph).
+        return 'pilcrow';
     }
 
     public function entry(): string

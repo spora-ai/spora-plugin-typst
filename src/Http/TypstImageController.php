@@ -42,10 +42,24 @@ final class TypstImageController
 
     /**
      * GET /api/v1/typst/images
+     *
+     * Optional `?principal_id=N` lets the caller scope the listing
+     * to any principal they can see (their own user-principal + the
+     * group-principals they're a member of). Omitting the param
+     * preserves the caller's own-principal default for backward
+     * compatibility with the v1 clients.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $principalId = $this->principalIdForCurrentUser();
+        $userId = $this->auth->currentUserId();
+        if ($userId === null || $userId <= 0) {
+            throw new RuntimeException('Authentication required');
+        }
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
         $rows = $this->store->listFor($principalId);
 
         return new JsonResponse([
@@ -146,6 +160,24 @@ final class TypstImageController
             throw new RuntimeException('Authentication required');
         }
         return $this->principals->ensureUserPrincipal($userId)->id;
+    }
+
+    /**
+     * Resolve the principal id from `?principal_id=N`, falling back to
+     * the caller's own user-principal. Validates the requested id is
+     * in `visiblePrincipalIds` for the caller — throws 404 if not.
+     */
+    private function resolvePrincipalId(Request $request, int $userId): int
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested === null || $requested === '') {
+            return $this->principals->ensureUserPrincipal($userId)->id;
+        }
+        $requestedId = (int) $requested;
+        if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+            throw new RuntimeException('Principal not visible to caller');
+        }
+        return $requestedId;
     }
 
     /**

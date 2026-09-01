@@ -34,10 +34,25 @@ final class TypstExampleController
 
     /**
      * GET /api/v1/typst/examples
+     *
+     * Optional `?principal_id=N` lets the caller scope the listing
+     * to any principal they can see (their own user-principal + the
+     * group-principals they're a member of). Omitting the param
+     * preserves the caller's own-principal default for backward
+     * compatibility with the v1 clients.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
+        $userId = $this->auth->currentUserId();
+        if ($userId === null || $userId <= 0) {
+            throw new RuntimeException('Authentication required');
+        }
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
+        $store = $this->storeForPrincipal($principalId);
 
         return new JsonResponse([
             'data' => [
@@ -129,6 +144,25 @@ final class TypstExampleController
         $principalId = $this->principals->ensureUserPrincipal($userId)->id;
         $paths = new TypstResourcePaths($this->paths(), $principalId);
         return new TypstResourceStore($paths);
+    }
+
+    private function storeForPrincipal(int $principalId): TypstResourceStore
+    {
+        $paths = new TypstResourcePaths($this->paths(), $principalId);
+        return new TypstResourceStore($paths);
+    }
+
+    private function resolvePrincipalId(Request $request, int $userId): int
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested === null || $requested === '') {
+            return $this->principals->ensureUserPrincipal($userId)->id;
+        }
+        $requestedId = (int) $requested;
+        if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+            throw new RuntimeException('Principal not visible to caller');
+        }
+        return $requestedId;
     }
 
     private function paths(): \Spora\Core\Paths
