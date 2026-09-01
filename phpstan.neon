@@ -10,3 +10,10 @@ parameters:
         - vendor
     bootstrapFiles:
         - vendor/autoload.php
+        - tests/bootstrap.php
+    ignoreErrors:
+        # Pest's `it()` test functions bind closure state on the
+        # dynamic TestCall instance — `$this->foo` reads/writes
+        # properties PHPStan can't statically infer. Matches the
+        # same pattern spora-core uses for its own Pest suite.
+        - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'

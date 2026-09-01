@@ -1,13 +1,13 @@
 {
     "$schema": "https://docs.spora-ai.com/schemas/plugin.schema.json",
-    "name": "spora-ai/spora-plugin-skeleton",
-    "slug": "skeleton",
-    "description": "Skeleton plugin — replace this with your plugin's description.",
-    "class": "Spora\\Plugins\\Skeleton\\SkeletonPlugin",
-    "icon": "puzzle",
+    "name": "spora-ai/spora-plugin-typst",
+    "slug": "typst",
+    "description": "Compile Typst source to PDF/PNG/SVG via ext-typst; ships Inter OFL fonts and a writable per-principal example store.",
+    "class": "Spora\\Plugins\\Typst\\TypstPlugin",
+    "icon": "file-type-2",
     "autoload": {
         "psr-4": {
-            "Spora\\Plugins\\Skeleton\\": "src/"
+            "Spora\\Plugins\\Typst\\": "src/"
         }
     }
 }

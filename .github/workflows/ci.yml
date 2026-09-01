@@ -35,6 +35,15 @@ jobs:
           coverage: none
           tools: composer
 
+      # ext-typst ships as a PECL extension. PECL install is the
+      # only step that may fail when ext-typst is unavailable — we
+      # deliberately continue-on-error because the producer's test
+      # cases skip themselves when the extension is missing
+      # (see tests/Pest.php).
+      - name: Install ext-typst
+        continue-on-error: true
+        run: pecl install typst
+
       - name: Composer install
         run: composer install --no-interaction --prefer-dist
 
@@ -59,7 +68,7 @@ jobs:
         run: composer install --no-interaction --prefer-dist
 
       - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --no-progress
+        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M
 
   code-style:
     name: php-cs-fixer (dry-run)
