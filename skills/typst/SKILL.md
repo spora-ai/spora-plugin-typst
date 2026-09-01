@@ -148,6 +148,35 @@ Two tiers:
 
 The default typst world merges both directories into `font_dirs` so a tier-2 font with the same basename as a skill-shipped font overrides it for that principal.
 
+## Referencing assets
+
+The `typst_render` tool returns an `asset_url` field shaped like
+`/api/v1/assets/<uuid>.<ext>`. This is the same canonical URL the
+media archive uses for any `media_assets` row, so it round-trips
+into `MediaEmbed` markdown, the chat composer, and `typst_render`'s
+own subsequent calls.
+
+To include an image in your Typst source, drop the URL straight
+into `#image()`:
+
+```typst
+#image("/api/v1/assets/01HXYZ....png", width: 80%)
+```
+
+Upload images via `POST /api/v1/typst/images` (or the Images tab
+on the admin panel). The asset_url is returned in the upload
+response — paste it into your `typst_render` source.
+
+Font references work the same way: the plugin's `font_dirs`
+include skill-shipped OFL fonts (Inter Regular + Bold) plus any
+principal-tier fonts uploaded via `POST /api/v1/typst/fonts`. Just
+reference them by basename in Typst source (`font: "Inter-Regular"`)
+— no URL needed.
+
+The playground's "Copy as `#image()`" button builds the same
+snippet the LLM would, so operator-pasted playground outputs and
+agent-generated renders share one URL convention.
+
 ## Examples
 
 Three worked examples to copy.
