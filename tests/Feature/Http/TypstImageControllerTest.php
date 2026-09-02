@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 const IMAGES_PATH = '/api/v1/typst/images';
-const JSON_MIME = 'application/json';
+const IMAGE_JSON_MIME = 'application/json';
 const PNG_MIME = 'image/png';
 
 use Spora\Core\Paths;
@@ -63,7 +63,7 @@ it('POST /typst/images uploads a base64-encoded PNG and returns the URL', functi
     $req = Request::create(
         IMAGES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
         content: json_encode([
             'filename' => 'logo.png',
             'mime'     => PNG_MIME,
@@ -85,7 +85,7 @@ it('POST /typst/images rejects an unsupported mime with 422', function () {
     $req = Request::create(
         IMAGES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
         content: json_encode(['mime' => 'image/gif', 'content' => 'abc']),
     );
     $resp = $this->controller->store($req);
@@ -99,7 +99,7 @@ it('POST /typst/images rejects an empty content field', function () {
     $req = Request::create(
         IMAGES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
         content: json_encode(['mime' => PNG_MIME, 'content' => '']),
     );
     $resp = $this->controller->store($req);
@@ -111,7 +111,7 @@ it('POST /typst/images accepts raw SVG markup as the content field', function ()
     $req = Request::create(
         IMAGES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
         content: json_encode([
             'mime'    => 'image/svg+xml',
             'content' => $svg,
@@ -175,7 +175,7 @@ it('POST /typst/images sanitises filenames with path separators', function () {
     $req = Request::create(
         IMAGES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
         content: json_encode([
             'filename' => '../../etc/passwd',
             'mime'     => PNG_MIME,

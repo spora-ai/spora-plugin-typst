@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 const COMPILE_PATH = '/api/v1/typst/compile';
-const JSON_MIME = 'application/json';
+const COMPILE_JSON_MIME = 'application/json';
 const SKIP_NO_EXT_TYPST = 'ext-typst is not loaded';
 const HELLO_SOURCE = '= Hello';
 
@@ -47,7 +47,7 @@ it('POST /typst/compile rejects unauthenticated callers with 401', function () {
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => HELLO_SOURCE]),
     );
 
@@ -61,7 +61,7 @@ it('POST /typst/compile rejects empty source with 422', function () {
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => '   ']),
     );
 
@@ -75,7 +75,7 @@ it('POST /typst/compile rejects an unknown format with 422', function () {
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => HELLO_SOURCE, 'format' => 'docx']),
     );
 
@@ -93,7 +93,7 @@ it('POST /typst/compile returns 401 when the session is wiped between requests',
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => HELLO_SOURCE]),
     );
     $this->auth->logOut();
@@ -113,7 +113,7 @@ it('POST /typst/compile persists a valid PDF render and returns the asset_url', 
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'pdf']),
     );
 
@@ -138,7 +138,7 @@ it('POST /typst/compile persists a PNG render and returns width + height', funct
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'png', 'dpi' => 144]),
     );
 
@@ -165,7 +165,7 @@ it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', fu
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode([
             'source' => "#include \"does-not-exist.typ\"\n",
             'format' => 'pdf',
@@ -195,7 +195,7 @@ it('POST /typst/compile strips absolute filesystem paths from diagnostic message
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: json_encode([
             'source' => "#image(\"missing.jpg\")\n",
             'format' => 'pdf',
@@ -219,7 +219,7 @@ it('POST /typst/compile rejects invalid JSON with 400', function () {
     $req = Request::create(
         COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
         content: '{ this is not json',
     );
 
