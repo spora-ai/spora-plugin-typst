@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
-use InvalidArgumentException;
 use RuntimeException;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -92,31 +93,68 @@ final class TypstRenderTool extends AbstractTypstTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $format = strtolower(trim((string) ($arguments['format'] ?? 'pdf')));
+        try {
+            $format = $this->validateFormat($arguments['format'] ?? 'pdf');
+            $resolved = $this->resolveSourceOrFail($arguments, $agentId, $userId, $context);
+            $producer = $this->findProducer();
+            if ($producer === null) {
+                throw new RenderToolFailed('typst_render: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
+            }
+            $output = $this->safeProduce($producer, $resolved['parent'], $format, $arguments);
+            $derivative = $this->safePersistDerivative(
+                $producer,
+                $resolved['parent'],
+                $output,
+                $format,
+                $userId,
+                $context,
+            );
+        } catch (RenderToolFailed $e) {
+            return new ToolResult(false, $e->getMessage());
+        }
+
+        return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format);
+    }
+
+    private function validateFormat(mixed $raw): string
+    {
+        $format = strtolower(trim((string) $raw));
         if (!in_array($format, ['pdf', 'png', 'svg'], true)) {
-            return new ToolResult(false, sprintf(
+            throw new RenderToolFailed(sprintf(
                 'typst_render: invalid format "%s" (expected: pdf, png, svg)',
                 $format,
             ));
         }
+        return $format;
+    }
 
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array{bytes: string, parent: MediaAsset}
+     */
+    private function resolveSourceOrFail(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): array
+    {
         try {
-            $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
-        } catch (InvalidArgumentException | RuntimeException $e) {
-            return new ToolResult(false, $e->getMessage());
+            return $this->resolveSource($arguments, $agentId, $userId, $context);
+        } catch (TypstInvalidArgumentException | TypstRuntimeException $e) {
+            throw new RenderToolFailed($e->getMessage());
         }
+    }
 
-        $producer = $this->findProducer();
-        if ($producer === null) {
-            return new ToolResult(false, 'typst_render: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
-        }
-
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function safeProduce(
+        TypstRenderProducer $producer,
+        MediaAsset $parent,
+        string $format,
+        array $arguments,
+    ): mixed {
         $page = isset($arguments['page']) ? max(0, (int) $arguments['page']) : null;
         $dpi  = isset($arguments['dpi']) ? max(36.0, min(600.0, (float) $arguments['dpi'])) : null;
-
         try {
-            $output = $producer->produce(
-                source: $resolved['parent'],
+            return $producer->produce(
+                source: $parent,
                 format: $format,
                 options: array_filter([
                     'page' => $page,
@@ -124,21 +162,23 @@ final class TypstRenderTool extends AbstractTypstTool
                 ], static fn($v): bool => $v !== null),
             );
         } catch (TypstCompilationException $e) {
-            $lines = ['typst_render: compilation failed:'];
-            foreach ($e->diagnostics as $diag) {
-                $lines[] = '- ' . $diag->message();
-            }
-            if ($e->diagnostics === []) {
-                $lines[] = $e->getMessage();
-            }
-            return new ToolResult(false, implode("\n", $lines));
+            throw new RenderToolFailed($this->formatCompilationFailure($e));
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_render: ' . $e->getMessage());
+            throw new RenderToolFailed('typst_render: ' . $e->getMessage());
         }
+    }
 
+    private function safePersistDerivative(
+        TypstRenderProducer $producer,
+        MediaAsset $parent,
+        mixed $output,
+        string $format,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): mixed {
         try {
-            $derivative = $this->derivativeService->create(
-                parent: $resolved['parent'],
+            return $this->derivativeService->create(
+                parent: $parent,
                 output: $output,
                 format: $format,
                 producerPlugin: $producer->pluginSlug(),
@@ -147,18 +187,33 @@ final class TypstRenderTool extends AbstractTypstTool
                 context: $context,
             );
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_render: failed to persist derivative: ' . $e->getMessage());
+            throw new RenderToolFailed('typst_render: failed to persist derivative: ' . $e->getMessage());
         }
+    }
 
+    private function formatCompilationFailure(TypstCompilationException $e): string
+    {
+        $lines = ['typst_render: compilation failed:'];
+        foreach ($e->diagnostics as $diag) {
+            $lines[] = '- ' . $diag->message();
+        }
+        if ($e->diagnostics === []) {
+            $lines[] = $e->getMessage();
+        }
+        return implode("\n", $lines);
+    }
+
+    private function buildSuccessToolResult(mixed $derivative, MediaAsset $parent, string $format): ToolResult
+    {
         $url = $derivative->asset_url;
-        $alt = sprintf('Typst %s render of %s', strtoupper($format), $resolved['parent']->filename ?? $resolved['parent']->id);
+        $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
 
         if ($format === 'pdf') {
             // PDFs aren't image-embedable in the chat sanitizer; pair
             // the link with a first-page PNG preview so the user sees
             // the result inline. The PNG is produced via the same
             // producer path and persisted as a sibling derivative.
-            $previewUrl = $this->firstPagePngUrl($resolved['parent']);
+            $previewUrl = $this->firstPagePngUrl($parent);
             $content = $previewUrl !== ''
                 ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
                 : sprintf("[Open PDF](%s)", $url);
@@ -211,10 +266,6 @@ final class TypstRenderTool extends AbstractTypstTool
         }
         try {
             $png = $producer->produce($parent, 'png', ['page' => 0, 'dpi' => 144.0]);
-        } catch (Throwable) {
-            return '';
-        }
-        try {
             $pngDerivative = $this->derivativeService->create(
                 parent: $parent,
                 output: $png,
@@ -230,3 +281,12 @@ final class TypstRenderTool extends AbstractTypstTool
         return $pngDerivative->asset_url;
     }
 }
+
+/**
+ * Internal control-flow exception thrown by helpers in
+ * {@see TypstRenderTool::execute()} to unwind request handling
+ * without piling up `return new ToolResult(false, ...)` statements
+ * (which Sonar's S1142 counts). Carries the message
+ * {@see execute()} wraps into a {@see ToolResult::ok()}-fail result.
+ */
+final class RenderToolFailed extends RuntimeException {}
