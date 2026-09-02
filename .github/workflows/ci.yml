@@ -165,15 +165,17 @@ jobs:
           touch storage/database.sqlite
           export SPORA_DB_DRIVER=sqlite
           export SPORA_DB_DATABASE="$PWD/storage/database.sqlite"
-          # Define BASE_PATH for the spora-core CLI entrypoint (it
-          # expects a real skeleton's bin/spora to set this). The
-          # skeleton's public/ web root + index.php aren't needed for
-          # `spora:install` — we just need a bare-minimum config
-          # bootstrap. Use public/index.php which performs the same
-          # env + secret-key dance as a real boot.
-          php -r "define('BASE_PATH', '$PWD'); require BASE_PATH . '/public/index.php';" || true
+
+          # The spora-core CLI entrypoint refuses to run without
+          # BASE_PATH defined (a real skeleton's bin/spora sets it).
+          # Use -d auto_prepend_file to inject a one-liner that
+          # defines the constant before the script loads.
+          cat > /tmp/_spora_bootstrap.php <<'PHP'
+          <?php
+          define('BASE_PATH', getenv('SPORA_SKELETON_BASE_PATH') ?: getcwd());
+          PHP
           SPORA_BIN="vendor/spora-ai/spora-core/bin/spora"
-          BASE_PATH="$PWD" php "$SPORA_BIN" spora:install
+          SPORA_SKELETON_BASE_PATH="$PWD" php -d auto_prepend_file=/tmp/_spora_bootstrap.php "$SPORA_BIN" spora:install
 
       - name: Verify plugin is discoverable
         working-directory: /tmp/skeleton
