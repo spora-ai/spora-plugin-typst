@@ -5,8 +5,37 @@ parameters:
     paths:
         - src
         - tests
+        - stubs
     level: 5
     excludePaths:
         - vendor
+    scanDirectories:
+        - stubs
     bootstrapFiles:
         - vendor/autoload.php
+        - tests/bootstrap.php
+    ignoreErrors:
+        # Pest's `it()` test functions bind closure state on the
+        # dynamic TestCall instance — `$this->foo` reads/writes
+        # properties PHPStan can't statically infer. Matches the
+        # same pattern spora-core uses for its own Pest suite.
+        - '#Access to an undefined property Pest\\PendingCalls\\TestCall::#'
+        # Pest's `expect()` chains `->not->toX()` against a typed
+        # Expectation. PHPStan can't statically prove `->not`
+        # resolves on every chain target.
+        - '#Access to an undefined property Pest\\Mixins\\Expectation#'
+        # Stub constructors carry every parameter the real ext-typst
+        # class accepts (so PHPStan matches callers' named-argument
+        # shape) but the bodies never read them — flagged as
+        # `constructor.unusedParameter`. Suppress only inside the
+        # stubs/ tree.
+        -
+            path: stubs/typst.php
+            message: '#Constructor of class Typst.*has an unused parameter#'
+        # `$this->markTestSkipped(...)` is a PHPUnit TestCase method
+        # that Pest proxies inside its closures. PHPStan statically
+        # reads `$this` as `Pest\PendingCalls\TestCall` and can't
+        # prove the proxy; markTestSkipped is always callable at
+        # runtime when the closure fires.
+        -
+            message: '#Call to an undefined method Pest\\PendingCalls\\TestCall::markTestSkipped\(\)#'

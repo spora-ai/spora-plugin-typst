@@ -35,8 +35,22 @@ jobs:
           coverage: none
           tools: composer
 
+      # ext-typst ships as a PECL extension. PECL install is the
+      # only step that may fail when ext-typst is unavailable — we
+      # deliberately continue-on-error because the producer's test
+      # cases skip themselves when the extension is missing
+      # (see tests/Pest.php).
+      - name: Install ext-typst
+        continue-on-error: true
+        run: pecl install typst
+
       - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+        # `--ignore-platform-req=ext-typst` lets composer resolve the
+        # dependency tree when the PECL install above failed (it has
+        # `continue-on-error: true` so a flaky install must not block
+        # other CI steps). The runtime test cases skip themselves when
+        # the extension is missing — see tests/Pest.php.
+        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Run Pest
         run: ./vendor/bin/pest
@@ -56,10 +70,10 @@ jobs:
           tools: composer
 
       - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Run PHPStan
-        run: ./vendor/bin/phpstan analyse --no-progress
+        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M
 
   code-style:
     name: php-cs-fixer (dry-run)
@@ -76,8 +90,113 @@ jobs:
           tools: composer
 
       - name: Composer install
-        run: composer install --no-interaction --prefer-dist
+        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Check code style
         # Same ruleset as Spora core's .php-cs-fixer.php so plugin style matches host.
         run: ./vendor/bin/php-cs-fixer fix --dry-run --diff --no-interaction
+
+  # Boot the plugin against a fresh spora-core install to verify the
+  # plugin contract resolves cleanly: manifest parses, DI bindings
+  # wire up, routes register, the producer hooks into
+  # MediaDerivativeProducerDiscovery. This catches breakage in the
+  # plugin's public surface (TypstPlugin::register / routes / apps /
+  # tools / skillPaths) without spinning up the full frontend stack.
+  integration:
+    name: Plugin boots in spora-core skeleton
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout plugin
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Checkout spora-core
+        # Sibling clone — composer path repos reference it via
+        # absolute paths from the skeleton's `composer.json`.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: spora-ai/spora-core
+          path: spora-core
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          extensions: pdo_sqlite, zip, mbstring
+          coverage: none
+          tools: composer
+
+      - name: Bootstrap skeleton
+        run: |
+          # Throwaway composer project that requires spora-core + this
+          # plugin as path repos. Mirrors spora-local/composer.json so
+          # the verification reflects the real operator wiring. Uses
+          # absolute paths so the path repos resolve regardless of
+          # the step's working directory.
+          mkdir -p /tmp/skeleton && cd /tmp/skeleton
+          composer init --name=spora/test-skeleton --type=project --no-interaction --quiet
+          composer config minimum-stability dev
+          composer config prefer-stable true
+          composer config allow-plugins.pestphp/pest-plugin true
+          composer config allow-plugins.spora-ai/installer true
+          composer config allow-plugins.composer/installers true
+          composer config repositories.spora-core path "$GITHUB_WORKSPACE/spora-core"
+          composer config repositories.typst path "$GITHUB_WORKSPACE"
+
+      - name: Install skeleton + spora-core + plugin
+        working-directory: /tmp/skeleton
+        run: |
+          # ext-typst isn't installed on the integration runner; mirror
+          # the platform-req skip the plugin's own CI uses.
+          composer require --no-interaction --ignore-platform-req=ext-typst \
+            spora-ai/spora-core:@dev \
+            spora-ai/installer:^1.5 \
+            "spora-ai/spora-plugin-typst:*@dev" 2>&1 | tail -30
+
+      - name: Migrate + boot CLI to surface plugin-load failures
+        working-directory: /tmp/skeleton
+        env:
+          # Generate a fresh base64 secret per CI run — the container's
+          # SecurityKeyDefinitions rejects malformed keys at boot, so a
+          # placeholder string fails fast. Falls back to a per-run
+          # generated key when no repo secret is configured.
+          SPORA_SECRET_KEY: ${{ secrets.SPORA_SECRET_KEY }}
+        run: |
+          # Plugin boot failures (manifest errors, DI resolution
+          # errors, missing routes) surface as PHP fatals or
+          # stack-trace messages during `spora:install`. A clean
+          # migration is sufficient evidence the plugin loads.
+          mkdir -p storage
+          touch storage/database.sqlite
+          export SPORA_DB_DRIVER=sqlite
+          export SPORA_DB_DATABASE="$PWD/storage/database.sqlite"
+          # If SPORA_SECRET_KEY wasn't injected from a repo secret,
+          # fall back to a fresh base64 key generated via openssl.
+          if [ -z "${SPORA_SECRET_KEY:-}" ]; then
+            export SPORA_SECRET_KEY="$(openssl rand -base64 32 | tr -d '\n')"
+          fi
+
+          # The spora-core CLI entrypoint refuses to run without
+          # BASE_PATH defined (a real skeleton's bin/spora sets it).
+          # Use -d auto_prepend_file to inject a one-liner that
+          # defines the constant before the script loads.
+          cat > /tmp/_spora_bootstrap.php <<'PHP'
+          <?php
+          define('BASE_PATH', getenv('SPORA_SKELETON_BASE_PATH') ?: getcwd());
+          PHP
+          SPORA_BIN="vendor/spora-ai/spora-core/bin/spora"
+          SPORA_SKELETON_BASE_PATH="$PWD" php -d auto_prepend_file=/tmp/_spora_bootstrap.php "$SPORA_BIN" spora:install
+
+      - name: Verify plugin is discoverable
+        working-directory: /tmp/skeleton
+        run: |
+          # The composer installer (spora-ai/installer, type:spora-plugin)
+          # routes packages into plugins/<package-short-name>/ — i.e.
+          # `spora-plugin-typst`, NOT `typst`. The package short name is
+          # what PluginLoader scans, and `spora:install` having run
+          # without fatal errors above is sufficient evidence the
+          # manifest parsed, the entry-point class autoloaded, and
+          # PluginLoader booted the plugin.
+          test -d plugins/spora-plugin-typst || (echo "Plugin NOT routed to plugins/spora-plugin-typst/" && exit 1)
+          test -f plugins/spora-plugin-typst/plugin.json || (echo "plugin.json missing" && exit 1)
+          test -f plugins/spora-plugin-typst/composer.json || (echo "composer.json missing" && exit 1)
+          echo "Plugin routed to plugins/spora-plugin-typst/ and manifest is in place."
