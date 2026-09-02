@@ -44,7 +44,7 @@ require it.
 | --- | --- |
 | PHP | `^8.4.1` |
 | `ext-typst` | `*` ([Carthage Software](https://ext-typst.carthage.software/) — install via PECL or your distro's package manager) |
-| spora-core | `dev-feat/media-principal-coverage` (see *Bootstrap* below) |
+| spora-core | `dev-main` — the plugin depends on `media_assets.principal_id` (migration 0075) and `media_derivatives` (0076), which are on `main` but not in the `v0.19.0` tag. Bump to a tagged release once the next spora-core tag ships those migrations. |
 
 ## Bootstrap
 

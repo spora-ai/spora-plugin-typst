@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "bbc8cfa4502fa3af4e51582652ed5cc5",
+    "content-hash": "97db4b298f72e5d4f2d4b76ffd3464b1",
     "packages": [
         {
             "name": "brick/math",
@@ -956,16 +956,16 @@
         },
         {
             "name": "illuminate/collections",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/collections.git",
-                "reference": "e89523328db4947d0a239de5607823402c414825"
+                "reference": "09fbf9c4441d1164b6178ad2f398d7e309450597"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/collections/zipball/e89523328db4947d0a239de5607823402c414825",
-                "reference": "e89523328db4947d0a239de5607823402c414825",
+                "url": "https://api.github.com/repos/illuminate/collections/zipball/09fbf9c4441d1164b6178ad2f398d7e309450597",
+                "reference": "09fbf9c4441d1164b6178ad2f398d7e309450597",
                 "shasum": ""
             },
             "require": {
@@ -1012,11 +1012,11 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-07T13:46:56+00:00"
+            "time": "2026-08-28T14:38:21+00:00"
         },
         {
             "name": "illuminate/conditionable",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/conditionable.git",
@@ -1062,16 +1062,16 @@
         },
         {
             "name": "illuminate/container",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/container.git",
-                "reference": "e6a04c60ae5cc6cc9ff30fbb4a32c076de914fa2"
+                "reference": "03e0a0cb51d438ea22136f084f77398c9aad7bad"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/container/zipball/e6a04c60ae5cc6cc9ff30fbb4a32c076de914fa2",
-                "reference": "e6a04c60ae5cc6cc9ff30fbb4a32c076de914fa2",
+                "url": "https://api.github.com/repos/illuminate/container/zipball/03e0a0cb51d438ea22136f084f77398c9aad7bad",
+                "reference": "03e0a0cb51d438ea22136f084f77398c9aad7bad",
                 "shasum": ""
             },
             "require": {
@@ -1120,11 +1120,11 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-20T09:53:45+00:00"
+            "time": "2026-08-31T13:50:11+00:00"
         },
         {
             "name": "illuminate/contracts",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/contracts.git",
@@ -1172,16 +1172,16 @@
         },
         {
             "name": "illuminate/database",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/database.git",
-                "reference": "3c1cddc391b81d6de6a546141b04a9ba08cd3376"
+                "reference": "78be392dca4f74863293bb58a06f05d9eb56bab6"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/database/zipball/3c1cddc391b81d6de6a546141b04a9ba08cd3376",
-                "reference": "3c1cddc391b81d6de6a546141b04a9ba08cd3376",
+                "url": "https://api.github.com/repos/illuminate/database/zipball/78be392dca4f74863293bb58a06f05d9eb56bab6",
+                "reference": "78be392dca4f74863293bb58a06f05d9eb56bab6",
                 "shasum": ""
             },
             "require": {
@@ -1242,20 +1242,20 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-25T20:54:30+00:00"
+            "time": "2026-09-01T21:26:53+00:00"
         },
         {
             "name": "illuminate/filesystem",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/filesystem.git",
-                "reference": "f1fad61d0317a05aa07b3108ded1c09fb06194c8"
+                "reference": "d8cc050541e2b13e2eba3c6937f54f395f7193cc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/filesystem/zipball/f1fad61d0317a05aa07b3108ded1c09fb06194c8",
-                "reference": "f1fad61d0317a05aa07b3108ded1c09fb06194c8",
+                "url": "https://api.github.com/repos/illuminate/filesystem/zipball/d8cc050541e2b13e2eba3c6937f54f395f7193cc",
+                "reference": "d8cc050541e2b13e2eba3c6937f54f395f7193cc",
                 "shasum": ""
             },
             "require": {
@@ -1311,11 +1311,11 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-21T11:09:19+00:00"
+            "time": "2026-08-31T13:52:34+00:00"
         },
         {
             "name": "illuminate/macroable",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/macroable.git",
@@ -1361,7 +1361,7 @@
         },
         {
             "name": "illuminate/pagination",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/pagination.git",
@@ -1411,7 +1411,7 @@
         },
         {
             "name": "illuminate/reflection",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/reflection.git",
@@ -1462,16 +1462,16 @@
         },
         {
             "name": "illuminate/support",
-            "version": "v13.29.0",
+            "version": "v13.30.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/support.git",
-                "reference": "e034c3ddd544e164c3f5d8baa879798907b96a28"
+                "reference": "4eb770b5997127f54c24e297d1202a6200969f51"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/support/zipball/e034c3ddd544e164c3f5d8baa879798907b96a28",
-                "reference": "e034c3ddd544e164c3f5d8baa879798907b96a28",
+                "url": "https://api.github.com/repos/illuminate/support/zipball/4eb770b5997127f54c24e297d1202a6200969f51",
+                "reference": "4eb770b5997127f54c24e297d1202a6200969f51",
                 "shasum": ""
             },
             "require": {
@@ -1537,7 +1537,7 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-25T15:03:19+00:00"
+            "time": "2026-08-31T13:53:09+00:00"
         },
         {
             "name": "intervention/gif",
@@ -3056,16 +3056,16 @@
         },
         {
             "name": "spora-ai/spora-core",
-            "version": "dev-feat/media-principal-coverage",
+            "version": "dev-main",
             "source": {
                 "type": "git",
-                "url": "git@github.com:spora-ai/spora-core.git",
-                "reference": "b508713b71ab5b1542227684ba71b07a38f1b2bc"
+                "url": "https://github.com/spora-ai/spora-core.git",
+                "reference": "bad570cf0013b3687fc4ebbccb08268605a110fc"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/b508713b71ab5b1542227684ba71b07a38f1b2bc",
-                "reference": "b508713b71ab5b1542227684ba71b07a38f1b2bc",
+                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/bad570cf0013b3687fc4ebbccb08268605a110fc",
+                "reference": "bad570cf0013b3687fc4ebbccb08268605a110fc",
                 "shasum": ""
             },
             "require": {
@@ -3115,6 +3115,7 @@
                 "phpstan/phpstan-mockery": "^2.0",
                 "zircote/swagger-php": "^6.4"
             },
+            "default-branch": true,
             "bin": [
                 "bin/spora",
                 "bin/spora-build"
@@ -3125,75 +3126,16 @@
                     "Spora\\": "app/"
                 }
             },
-            "autoload-dev": {
-                "files": [
-                    "tests/Support/CrossFileTestHelpers.php"
-                ],
-                "psr-4": {
-                    "Tests\\": "tests/",
-                    "Tests\\Fixtures\\Plugins\\AppPlugin\\": "tests/Fixtures/plugins_with_app/AppPlugin/",
-                    "Tests\\Fixtures\\Plugins\\ManifestPlugin\\": "tests/Fixtures/plugins_with_manifest/ManifestPlugin/",
-                    "Tests\\Fixtures\\Plugins\\NamedPlugin\\": "tests/Fixtures/plugins_with_custom_file/NamedPlugin/",
-                    "Tests\\Fixtures\\Plugins\\ToolsPlugin\\": "tests/Fixtures/plugins_with_tools/ToolsPlugin/",
-                    "Tests\\Fixtures\\Plugins\\MigratingPlugin\\": "tests/Fixtures/plugins_with_migrations/MigratingPlugin/",
-                    "Tests\\Fixtures\\Plugins\\InventoryPlugin\\": "tests/Fixtures/plugins_inventory/InventoryPlugin/",
-                    "Tests\\Fixtures\\Plugins\\DefaultIconPlugin\\": "tests/Fixtures/plugins_inventory_brain/DefaultIconPlugin/",
-                    "Tests\\Fixtures\\Plugins\\BadPrefixPlugin\\": "tests/Fixtures/plugins_bad_migrations/BadPrefixPlugin/",
-                    "Tests\\Fixtures\\Plugins\\NotAPlugin\\": "tests/Fixtures/plugins_invalid_manifest/NotAPlugin/",
-                    "Tests\\Fixtures\\PluginWithIcon\\IconPlugin\\": "tests/Fixtures/plugin_with_icon/IconPlugin/"
-                },
-                "exclude-from-classmap": [
-                    "tests/Fixtures/plugins_with_migrations/",
-                    "tests/Fixtures/plugins_with_manifest/",
-                    "tests/Fixtures/plugins_bad_migrations/",
-                    "tests/Fixtures/plugins_with_custom_file/",
-                    "tests/Feature/RouterTest.php"
-                ]
-            },
-            "scripts": {
-                "setup": [
-                    "@php bin/spora spora:install",
-                    "@php bin/spora db:seed"
-                ],
-                "reset": [
-                    "@php bin/spora db:reset"
-                ],
-                "install:db": [
-                    "@php bin/spora spora:install"
-                ],
-                "seed": [
-                    "@php bin/spora db:seed"
-                ],
-                "test": [
-                    "./vendor/bin/pest"
-                ],
-                "test:parallel": [
-                    "./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 --fail-on-risky"
-                ],
-                "test:coverage": [
-                    "./vendor/bin/pest --coverage --coverage-html=coverage --fail-on-risky"
-                ],
-                "test:coverage:clover": [
-                    "./vendor/bin/pest --coverage-clover=coverage.xml --fail-on-risky"
-                ],
-                "analyse": [
-                    "./vendor/bin/phpstan analyse --memory-limit=2G"
-                ],
-                "format": [
-                    "./vendor/bin/php-cs-fixer fix"
-                ],
-                "openapi": [
-                    "@php bin/spora-build openapi:generate"
-                ],
-                "openapi:check": [
-                    "@php bin/spora-build openapi:check"
-                ]
-            },
+            "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
             "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
-            "time": "2026-09-01T12:01:18+00:00"
+            "support": {
+                "issues": "https://github.com/spora-ai/spora-core/issues",
+                "source": "https://github.com/spora-ai/spora-core/tree/main"
+            },
+            "time": "2026-09-02T07:04:24+00:00"
         },
         {
             "name": "symfony/clock",
@@ -10254,14 +10196,7 @@
             "time": "2026-06-15T15:31:57+00:00"
         }
     ],
-    "aliases": [
-        {
-            "package": "spora-ai/spora-core",
-            "version": "dev-feat/media-principal-coverage",
-            "alias": "0.19.x-dev",
-            "alias_normalized": "0.19.9999999.9999999-dev"
-        }
-    ],
+    "aliases": [],
     "minimum-stability": "dev",
     "stability-flags": {
         "spora-ai/spora-core": 20
