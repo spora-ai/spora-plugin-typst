@@ -155,7 +155,10 @@ jobs:
       - name: Migrate + boot CLI to surface plugin-load failures
         working-directory: /tmp/skeleton
         env:
-          SPORA_SECRET_KEY: ${{ secrets.SPORA_SECRET_KEY || 'ci-test-secret-not-for-production' }}
+          # Always generate a fresh base64 secret per CI run — the
+          # container's SecurityKeyDefinitions rejects malformed
+          # keys at boot, so a placeholder string fails fast.
+          SPORA_SECRET_KEY: ${{ secrets.SPORA_SECRET_KEY || (base64_encode(random_bytes(32))) }}
         run: |
           # Plugin boot failures (manifest errors, DI resolution
           # errors, missing routes) surface as PHP fatals or
