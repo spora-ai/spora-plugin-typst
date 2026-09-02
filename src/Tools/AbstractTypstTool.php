@@ -119,7 +119,12 @@ abstract class AbstractTypstTool extends AbstractTool
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
-        if ((int) $asset->user_id === (int) $ownerUserId) {
+        return $this->assetVisibility($asset, $ownerUserId, $principalId);
+    }
+
+    private function assetVisibility(MediaAsset $asset, int $ownerUserId, int $principalId): bool
+    {
+        if ((int) $asset->user_id === $ownerUserId) {
             return true;
         }
         if ($asset->agent_id === null) {

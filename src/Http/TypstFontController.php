@@ -96,25 +96,13 @@ final class TypstFontController
      */
     public function store(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $name    = trim((string) ($body['name'] ?? ''));
-        $content = $body['content'] ?? null;
-
-        if ($name === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'name is required');
-        }
-        if (!is_string($content) || $content === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'content is required');
-        }
-
-        $bytes = $this->decodeContent($content);
         try {
-            $path = $store->write(TypstResourcePaths::KIND_FONT, $name, $bytes);
+            $store = $this->storeForCurrentUser();
+            $inputs = $this->parseStoreInputs($request);
+            $bytes = $this->decodeContent($inputs['content']);
+            $path = $store->write(TypstResourcePaths::KIND_FONT, $inputs['name'], $bytes);
+        } catch (FontValidationFailed $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
         }
@@ -122,7 +110,7 @@ final class TypstFontController
         return new JsonResponse([
             'data' => [
                 'font' => [
-                    'name'   => $name,
+                    'name'   => $inputs['name'],
                     'kind'   => TypstResourcePaths::KIND_FONT,
                     'size'   => strlen($bytes),
                     'path'   => $path,
@@ -130,6 +118,32 @@ final class TypstFontController
                 ],
             ],
         ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * @return array{name: string, content: string}
+     */
+    private function parseStoreInputs(Request $request): array
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new FontValidationFailed($body);
+        }
+        $name    = trim((string) ($body['name'] ?? ''));
+        $content = $body['content'] ?? null;
+
+        if ($name === '') {
+            throw new FontValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'name is required'),
+            );
+        }
+        if (!is_string($content) || $content === '') {
+            throw new FontValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required'),
+            );
+        }
+
+        return ['name' => $name, 'content' => $content];
     }
 
     /**
@@ -216,5 +230,20 @@ final class TypstFontController
             }
         }
         return $content;
+    }
+}
+
+/**
+ * Internal control-flow exception thrown by
+ * {@see TypstFontController::parseStoreInputs()} to unwind request
+ * parsing without piling up `return $errorResponse` statements
+ * (SonarCloud's S1142 budget). Carries the JsonResponse the public
+ * method would otherwise have returned inline.
+ */
+final class FontValidationFailed extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('font validation failed');
     }
 }
