@@ -111,7 +111,7 @@ jobs:
 
       - name: Checkout spora-core
         # Sibling clone — composer path repos reference it via
-        # `../spora-core` from the skeleton's `composer.json`.
+        # absolute paths from the skeleton's `composer.json`.
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: spora-ai/spora-core
@@ -129,7 +129,9 @@ jobs:
         run: |
           # Throwaway composer project that requires spora-core + this
           # plugin as path repos. Mirrors spora-local/composer.json so
-          # the verification reflects the real operator wiring.
+          # the verification reflects the real operator wiring. Uses
+          # absolute paths so the path repos resolve regardless of
+          # the step's working directory.
           mkdir -p /tmp/skeleton && cd /tmp/skeleton
           composer init --name=spora/test-skeleton --type=project --no-interaction --quiet
           composer config minimum-stability dev
@@ -137,8 +139,8 @@ jobs:
           composer config allow-plugins.pestphp/pest-plugin true
           composer config allow-plugins.spora-ai/installer true
           composer config allow-plugins.composer/installers true
-          composer config repositories.spora-core path ../spora-core
-          composer config repositories.typst path $GITHUB_WORKSPACE
+          composer config repositories.spora-core path "$GITHUB_WORKSPACE/spora-core"
+          composer config repositories.typst path "$GITHUB_WORKSPACE"
 
       - name: Install skeleton + spora-core + plugin
         working-directory: /tmp/skeleton
