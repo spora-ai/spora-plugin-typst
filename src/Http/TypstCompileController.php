@@ -139,21 +139,21 @@ final class TypstCompileController
         } catch (TypstCompilationException $e) {
             $diagnostics = [];
             foreach ($e->diagnostics as $diag) {
-                $diagnostics[] = ['message' => $diag->message()];
+                $diagnostics[] = ['message' => self::sanitiseDiagnostic($diag->message())];
             }
             if ($diagnostics === []) {
-                $diagnostics[] = ['message' => $e->getMessage()];
+                $diagnostics[] = ['message' => self::sanitiseDiagnostic($e->getMessage())];
             }
             return new JsonResponse(
                 ['error' => ['code' => 'COMPILATION_FAILED', 'message' => 'Typst compilation failed', 'diagnostics' => $diagnostics]],
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         } catch (InvalidArgumentException | RuntimeException $e) {
-            return $this->unprocessable('COMPILATION_FAILED', $e->getMessage());
+            return $this->unprocessable('COMPILATION_FAILED', self::sanitiseDiagnostic($e->getMessage()));
         } catch (Throwable $e) {
             return $this->error(
                 'COMPILATION_FAILED',
-                'typst compile: ' . $e->getMessage(),
+                'typst compile: ' . self::sanitiseDiagnostic($e->getMessage()),
                 Response::HTTP_UNPROCESSABLE_ENTITY,
             );
         }
@@ -355,5 +355,47 @@ final class TypstCompileController
         $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
         $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+    }
+
+    /**
+     * Strip the local filesystem paths that ext-typst embeds in its
+     * diagnostic messages ("file not found (searched at
+     * /Users/fabeat/Development/Spora/.../skills/typst/templates/foo.jpg)").
+     *
+     * The raw message is great for an LLM that needs to debug a
+     * build, but it's a footgun in a public-facing error surface:
+     * it leaks the operator's filesystem layout, the project's
+     * vendor / plugin paths, and sometimes the principal's home
+     * directory. Two passes:
+     *
+     *   1. replace any `(searched at <path>)` clause with
+     *      `(file not found)` — the diagnostic still tells the
+     *      user WHAT happened without telling them WHERE we looked.
+     *   2. strip any remaining absolute filesystem path
+     *      (`/Users/...`, `/home/...`, `C:\...`) and replace with
+     *      `<path>` — a final safety net for any future diagnostic
+     *      shape that we don't catch in (1).
+     */
+    private static function sanitiseDiagnostic(string $message): string
+    {
+        $message = preg_replace(
+            '/\(searched at [^)]+\)/',
+            '(file not found)',
+            $message,
+        ) ?? $message;
+        // POSIX absolute paths (incl. /Users/..., /home/..., /opt/...,
+        // /var/..., /tmp/..., /private/... on macOS).
+        $message = preg_replace(
+            '#(/[A-Za-z0-9._-]+){2,}#',
+            '<path>',
+            $message,
+        ) ?? $message;
+        // Windows-style absolute paths.
+        $message = preg_replace(
+            '#([A-Za-z]:\\\\[A-Za-z0-9._-]+){2,}#',
+            '<path>',
+            $message,
+        ) ?? $message;
+        return $message;
     }
 }

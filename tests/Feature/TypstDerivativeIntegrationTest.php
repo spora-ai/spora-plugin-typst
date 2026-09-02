@@ -5,7 +5,6 @@ declare(strict_types=1);
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeService;
@@ -17,10 +16,7 @@ beforeEach(function () {
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-    $paths = new TypstResourcePaths(
-        new Spora\Core\Paths(sys_get_temp_dir()),
-        principalId: 1,
-    );
+    $paths = new Spora\Core\Paths(sys_get_temp_dir());
     $this->producer = new TypstRenderProducer(new TypstWorldFactory($paths));
 });
 

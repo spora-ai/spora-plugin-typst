@@ -12,14 +12,27 @@ use Spora\Core\Paths;
 /**
  * Computes the on-disk locations of Typst plugin resources.
  *
- * Three kinds, two tiers:
+ * Storage layout (per principal, all under one root):
+ *
+ *   <storage>/typst/<principal>/
+ *     templates/                # `.typ` end-user document skeletons
+ *     examples/                 # `.typ` pattern snippets the LLM reads
+ *     fonts/                    # font files (otf, ttf, ...)
+ *     <image-files-directly>    # images, one file per upload
+ *
+ *   <plugin>/skills/typst/      # tier 1 (skill-shipped, read-only)
+ *     fonts/
+ *     templates/
+ *     examples/
+ *
+ * Three kinds of resources, two tiers:
  *
  *   | Kind      | Tier 1 (skill, read-only)        | Tier 2 (principal, writable)             |
  *   |-----------|----------------------------------|------------------------------------------|
- *   | `font`    | `<plugin>/skills/typst/fonts/`   | `<storage>/typst/fonts/<principal>/`    |
- *   | `template`| `<plugin>/skills/typst/templates/`|`<storage>/typst/templates/<principal>/`  |
- *   | `example` | `<plugin>/skills/typst/examples/`| `<storage>/typst/examples/<principal>/`   |
- *   | `image`   | (none — examples are uploads)    | `<storage>/typst/images/<principal>/`     |
+ *   | `font`    | `<plugin>/skills/typst/fonts/`   | `<storage>/typst/<principal>/fonts/`     |
+ *   | `template`| `<plugin>/skills/typst/templates/`| `<storage>/typst/<principal>/templates/` |
+ *   | `example` | `<plugin>/skills/typst/examples/`| `<storage>/typst/<principal>/examples/`  |
+ *   | `image`   | (none — images are uploads)      | `<storage>/typst/<principal>/`           |
  *
  * `template` and `example` look the same to Typst — both are
  * `.typ` files referenced via `#include`. The distinction is purely
@@ -33,11 +46,24 @@ use Spora\Core\Paths;
  * earlier font + example design locked in. The listing API merges
  * both tiers.
  *
- * The plugin's TypstWorldFactory uses these paths to set
- * `template_dir` (per-principal so `#include "templates/foo.typ"` and
- * `#include "examples/bar.typ"` both resolve under it) and
+ * Why images live at the principal root, not in an `images/`
+ * subdir: the `template_dir` we hand to ext-typst is
+ * `<storage>/typst/<principal>/`, and Typst's `#image("foo.jpg")`
+ * resolves a relative path against that directory. Nesting images
+ * under `images/` would force operators to type
+ * `#image("images/foo.jpg")` for every reference — bad UX. The
+ * `TypstImageController::index()` filter (by image extension) keeps
+ * the listing clean even though the image directory is shared with
+ * templates/examples/fonts. See that controller for the listing
+ * logic; the resource directory is intentionally untyped so the
+ * search path is flat from Typst's perspective.
+ *
+ * The plugin's {@see TypstWorldFactory} uses these paths to set
+ * `template_dir` (per-principal so `#include "templates/foo.typ"`
+ * and `#include "examples/bar.typ"` both resolve under it, and
+ * `#image("foo.jpg")` resolves to the image directly) and
  * `font_dirs` (an array of tier-1 + tier-2 paths Typst searches
- * recursively). See {@see TypstWorldFactory} for the world config.
+ * recursively).
  */
 final class TypstResourcePaths
 {
@@ -92,10 +118,12 @@ final class TypstResourcePaths
 
     public function principalDirectory(): string
     {
-        // Per-principal "base" directory. Typst's `template_dir` is
-        // set to this so its `templates/` and `examples/` subdirs are
-        // both visible under `#include "templates/foo"` /
-        // `#include "examples/bar"`.
+        // Per-principal root. Typst's `template_dir` is set to this
+        // so `#include "templates/foo.typ"`, `#include "examples/bar.typ"`,
+        // and `#image("basename.jpg")` all resolve directly: the first
+        // two via kind subdirs, the third because images live at the
+        // root (see the class docblock for the rationale on the flat
+        // image layout).
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalDirectory() called without a principal scope');
         }
@@ -104,13 +132,10 @@ final class TypstResourcePaths
 
     public function principalFontDirectory(): string
     {
-        // Kind-first: `<storage>/typst/fonts/<principal>/` — matches
-        // the skill-shipped tier-1 path layout (which is also
-        // kind-first: `<plugin>/skills/typst/fonts/`).
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalFontDirectory() called without a principal scope');
         }
-        return $this->paths->storage('typst/fonts') . '/' . $this->principalId;
+        return $this->principalDirectory() . '/fonts';
     }
 
     public function principalTemplateDirectory(): string
@@ -118,7 +143,7 @@ final class TypstResourcePaths
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalTemplateDirectory() called without a principal scope');
         }
-        return $this->paths->storage('typst/templates') . '/' . $this->principalId;
+        return $this->principalDirectory() . '/templates';
     }
 
     public function principalExampleDirectory(): string
@@ -126,15 +151,21 @@ final class TypstResourcePaths
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalExampleDirectory() called without a principal scope');
         }
-        return $this->paths->storage('typst/examples') . '/' . $this->principalId;
+        return $this->principalDirectory() . '/examples';
     }
 
     public function principalImageDirectory(): string
     {
+        // Images are stored directly under the principal root, not in
+        // an `images/` subdir, so `#image("basename.jpg")` resolves
+        // against the same `template_dir` that templates/examples
+        // resolve against. The `TypstImageController::index()` filters
+        // the listing by image extension so the shared directory
+        // doesn't pollute the image API.
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalImageDirectory() called without a principal scope');
         }
-        return $this->paths->storage('typst/images') . '/' . $this->principalId;
+        return $this->principalDirectory();
     }
 
     /**

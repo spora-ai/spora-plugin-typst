@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -27,10 +26,7 @@ beforeEach(function () {
     // The world factory is real; the controller reaches into it to
     // build producers via MediaDerivativeProducerDiscovery. Tests
     // that don't actually compile skip the ext-typst gate below.
-    $paths = new TypstResourcePaths(
-        new Spora\Core\Paths(sys_get_temp_dir()),
-        principalId: 1,
-    );
+    $paths = new Spora\Core\Paths(sys_get_temp_dir());
     $this->worldFactory = new TypstWorldFactory($paths);
 
     $this->controller = new TypstCompileController(
@@ -176,6 +172,42 @@ it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', fu
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('COMPILATION_FAILED');
     expect($body['error']['diagnostics'] ?? [])->not->toBe([]);
+});
+
+it('POST /typst/compile strips absolute filesystem paths from diagnostic messages', function () {
+    if (!extension_loaded('typst')) {
+        $this->markTestSkipped('ext-typst is not loaded');
+    }
+    MediaDerivativeProducerDiscovery::reset();
+    MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
+
+    // The image-not-found path on the real build leaks a
+    // "(searched at /Users/.../skills/typst/templates/foo.jpg)"
+    // segment, which exposes the operator's filesystem layout
+    // and the plugin's installed location to anyone who can
+    // see the playground's error toast. The controller must
+    // strip that.
+    $req = Request::create(
+        '/api/v1/typst/compile',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode([
+            'source' => "#image(\"missing.jpg\")\n",
+            'format' => 'pdf',
+        ]),
+    );
+
+    $resp = $this->controller->compile($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+
+    $json = (string) $resp->getContent();
+    // POSIX absolute paths should not appear in the public error.
+    expect($json)->not->toMatch('#/(Users|home|opt|var|tmp|private)/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+){1,}#');
+    // The "(searched at ...)" clause is replaced with a
+    // generic "(file not found)".
+    expect($json)->not->toContain('searched at');
 });
 
 it('POST /typst/compile rejects invalid JSON with 400', function () {

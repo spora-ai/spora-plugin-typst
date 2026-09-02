@@ -20,21 +20,27 @@ it('exposes the skill directories under the plugin install root', function () {
 });
 
 it('exposes the principal directories under storage', function () {
+    // Per-principal layout: all four kinds live under
+    // `<storage>/typst/<principal>/`. Kind subdirs are used for
+    // fonts/templates/examples so they don't pollute the
+    // `template_dir` listing; images live directly at the root so
+    // `#image("basename.jpg")` resolves without an `images/` prefix.
     expect($this->resourcePaths->principalFontDirectory())
-        ->toEndWith('/typst/fonts/42');
+        ->toEndWith('/typst/42/fonts');
     expect($this->resourcePaths->principalTemplateDirectory())
-        ->toEndWith('/typst/templates/42');
+        ->toEndWith('/typst/42/templates');
     expect($this->resourcePaths->principalExampleDirectory())
-        ->toEndWith('/typst/examples/42');
+        ->toEndWith('/typst/42/examples');
     expect($this->resourcePaths->principalImageDirectory())
-        ->toEndWith('/typst/images/42');
+        ->toEndWith('/typst/42');
 });
 
 it('exposes a per-principal base directory that contains templates + examples subdirs', function () {
-    // `principalDirectory()` is the `template_dir` Typst sees; both
-    // `templates/` and `examples/` live under it as siblings so
+    // `principalDirectory()` is the `template_dir` Typst sees;
+    // `templates/` and `examples/` are sibling subdirs under it so
     // `#include "templates/foo.typ"` and `#include "examples/bar.typ"`
-    // both resolve naturally.
+    // both resolve. Images are stored directly at this root so
+    // `#image("basename.jpg")` also resolves.
     expect($this->resourcePaths->principalDirectory())
         ->toEndWith('/typst/42');
 });
@@ -70,7 +76,7 @@ it('lists skill-shipped resources from tier 1', function () {
     // InstalledVersions — covered in practice by composer-install
     // running from the plugin root, so here we just verify the
     // tier-2 listing returns our principal uploads.
-    $principalFontDir = $paths->storage('typst/fonts') . '/42';
+    $principalFontDir = $paths->storage('typst') . '/42/fonts';
     @mkdir($principalFontDir, 0o755, true);
     file_put_contents($principalFontDir . '/Custom.otf', 'fake');
 
@@ -91,8 +97,8 @@ it('shadows tier-1 with tier-2 on basename collision', function () {
     // principaldirectory() + listDirectory() split without depending on
     // ext-typst or the real install.
     $base = sys_get_temp_dir() . '/typst-shadow-' . bin2hex(random_bytes(4));
-    @mkdir($base . '/storage/typst/fonts/42', 0o755, true);
-    file_put_contents($base . '/storage/typst/fonts/42/Inter-Regular.otf', 'override');
+    @mkdir($base . '/storage/typst/42/fonts', 0o755, true);
+    file_put_contents($base . '/storage/typst/42/fonts/Inter-Regular.otf', 'override');
 
     $paths = new Paths($base);
     $rp = new TypstResourcePaths($paths, principalId: 42);
@@ -101,9 +107,9 @@ it('shadows tier-1 with tier-2 on basename collision', function () {
     // Just one entry, not two.
     expect(array_count_values($names))->toHaveCount(count($names));
 
-    @unlink($base . '/storage/typst/fonts/42/Inter-Regular.otf');
-    @rmdir($base . '/storage/typst/fonts/42');
-    @rmdir($base . '/storage/typst/fonts');
+    @unlink($base . '/storage/typst/42/fonts/Inter-Regular.otf');
+    @rmdir($base . '/storage/typst/42/fonts');
+    @rmdir($base . '/storage/typst/42');
     @rmdir($base . '/storage/typst');
     @rmdir($base . '/storage');
     @rmdir($base);

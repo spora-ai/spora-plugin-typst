@@ -8,12 +8,13 @@ use Spora\Plugins\Typst\Services\TypstResourceStore;
 
 beforeEach(function () {
     $this->base = sys_get_temp_dir() . '/typst-store-test-' . bin2hex(random_bytes(4));
-    @mkdir($this->base . '/storage/typst/fonts/42', 0o755, true);
-    @mkdir($this->base . '/storage/typst/examples/42', 0o755, true);
-    @mkdir($this->base . '/storage/typst/fonts/99', 0o755, true);
-    file_put_contents($this->base . '/storage/typst/fonts/42/Inter-Black.otf', 'fake-font-bytes');
-    file_put_contents($this->base . '/storage/typst/fonts/99/Other.otf', 'different-principal');
-    file_put_contents($this->base . '/storage/typst/examples/42/invoice.typ', '= Invoice\n');
+    // Per-principal layout: <storage>/typst/<principal>/{fonts,examples}
+    @mkdir($this->base . '/storage/typst/42/fonts', 0o755, true);
+    @mkdir($this->base . '/storage/typst/42/examples', 0o755, true);
+    @mkdir($this->base . '/storage/typst/99/fonts', 0o755, true);
+    file_put_contents($this->base . '/storage/typst/42/fonts/Inter-Black.otf', 'fake-font-bytes');
+    file_put_contents($this->base . '/storage/typst/99/fonts/Other.otf', 'different-principal');
+    file_put_contents($this->base . '/storage/typst/42/examples/invoice.typ', '= Invoice\n');
 
     $this->paths = new Paths($this->base);
     $this->resourcePaths = new TypstResourcePaths($this->paths, principalId: 42);
@@ -21,14 +22,14 @@ beforeEach(function () {
 });
 
 afterEach(function () {
-    @unlink($this->base . '/storage/typst/fonts/42/Inter-Black.otf');
-    @unlink($this->base . '/storage/typst/fonts/99/Other.otf');
-    @unlink($this->base . '/storage/typst/examples/42/invoice.typ');
-    @rmdir($this->base . '/storage/typst/fonts/42');
-    @rmdir($this->base . '/storage/typst/fonts/99');
-    @rmdir($this->base . '/storage/typst/fonts');
-    @rmdir($this->base . '/storage/typst/examples/42');
-    @rmdir($this->base . '/storage/typst/examples');
+    @unlink($this->base . '/storage/typst/42/fonts/Inter-Black.otf');
+    @unlink($this->base . '/storage/typst/99/fonts/Other.otf');
+    @unlink($this->base . '/storage/typst/42/examples/invoice.typ');
+    @rmdir($this->base . '/storage/typst/42/fonts');
+    @rmdir($this->base . '/storage/typst/42/examples');
+    @rmdir($this->base . '/storage/typst/42');
+    @rmdir($this->base . '/storage/typst/99/fonts');
+    @rmdir($this->base . '/storage/typst/99');
     @rmdir($this->base . '/storage/typst');
     @rmdir($this->base . '/storage');
     @rmdir($this->base);
@@ -59,7 +60,8 @@ it('reads the principal upload bytes verbatim', function () {
 
 it('writes a new tier-2 resource', function () {
     $path = $this->store->write(TypstResourcePaths::KIND_FONT, 'New.otf', 'hello');
-    expect($path)->toEndWith('/42/New.otf');
+    // Per-principal layout: <storage>/typst/<principal>/fonts/<basename>
+    expect($path)->toEndWith('/typst/42/fonts/New.otf');
     expect($this->store->read(TypstResourcePaths::KIND_FONT, 'New.otf'))->toBe('hello');
     @unlink($path);
 });
@@ -95,5 +97,5 @@ it('deletes a principal-tier resource', function () {
     $this->store->delete(TypstResourcePaths::KIND_FONT, 'Inter-Black.otf');
     expect($this->store->read(TypstResourcePaths::KIND_FONT, 'Inter-Black.otf'))->toBeNull();
     // re-create for afterEach cleanup
-    file_put_contents($this->base . '/storage/typst/fonts/42/Inter-Black.otf', 'fake-font-bytes');
+    file_put_contents($this->base . '/storage/typst/42/fonts/Inter-Black.otf', 'fake-font-bytes');
 });

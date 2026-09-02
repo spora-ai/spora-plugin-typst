@@ -69,18 +69,18 @@ afterEach(function () {
     }
 });
 
-it('GET /typst/templates lists the skill-shipped invoice.typ by default', function () {
+it('GET /typst/templates lists the skill-shipped report.typ by default', function () {
     $resp = $this->controller->index(Request::create('/api/v1/typst/templates', 'GET'));
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);
     $names = array_column($body['data']['templates'], 'name');
-    expect($names)->toContain('invoice.typ');
+    expect($names)->toContain('report.typ');
     foreach ($body['data']['templates'] as $row) {
         expect($row['kind'])->toBe('template');
     }
 });
 
-it('POST /typst/templates writes a template to <storage>/typst/templates/<principal>/', function () {
+it('POST /typst/templates writes a template to <storage>/typst/<principal>/templates/', function () {
     $req = Request::create(
         '/api/v1/typst/templates',
         'POST',

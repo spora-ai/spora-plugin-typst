@@ -117,10 +117,14 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         $sourceBytes = $this->loadSourceBytes($source);
         $page = isset($options['page']) ? max(0, (int) $options['page']) : 0;
 
-        // Build a world configured for this principal's font_dirs.
-        // Per-call cost is one World allocation; the inspector+compiler
-        // share it for diagnostics-first dispatch.
-        $stack = $this->worldFactory->build();
+        // Build a world configured for this source's principal so
+        // the per-principal template_dir / font_dirs / images are
+        // visible. The principal is sourced from the source
+        // MediaAsset (every render has one) rather than from a
+        // constructor-time singleton, because the producer is
+        // shared across principals via MediaDerivativeProducerDiscovery.
+        $principalId = $source->principal_id !== null ? (int) $source->principal_id : null;
+        $stack = $this->worldFactory->build($principalId);
 
         // Diagnostics-first: refuse to render when the inspector
         // reports errors. The producer is otherwise silent on

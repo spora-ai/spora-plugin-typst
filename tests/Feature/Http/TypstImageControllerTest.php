@@ -148,14 +148,16 @@ it('DELETE /typst/images/{name} removes the file from disk', function () {
     )->id;
     $store = new TypstImageStore(new TypstResourcePaths($this->paths, $principalId));
     $store->write('x', 'image/png', 'doomed.png');
-    expect(is_file($this->tempDir . '/storage/typst/images/' . $principalId . '/doomed.png'))->toBeTrue();
+    // Per-principal layout: images live directly under
+    // <storage>/typst/<principal>/, not in an images/ subdir.
+    expect(is_file($this->tempDir . '/storage/typst/' . $principalId . '/doomed.png'))->toBeTrue();
 
     $req = Request::create('/api/v1/typst/images/doomed.png', 'DELETE');
     $req->attributes->set('name', 'doomed.png');
     $resp = $this->controller->destroy($req);
 
     expect($resp->getStatusCode())->toBe(204);
-    expect(is_file($this->tempDir . '/storage/typst/images/' . $principalId . '/doomed.png'))->toBeFalse();
+    expect(is_file($this->tempDir . '/storage/typst/' . $principalId . '/doomed.png'))->toBeFalse();
 });
 
 it('DELETE /typst/images/{name} returns 404 for a missing image', function () {

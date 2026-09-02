@@ -9,14 +9,14 @@ use Spora\Plugins\Typst\Services\TypstWorldFactory;
 beforeEach(function () {
     $this->paths = new Paths(sys_get_temp_dir());
     $this->resourcePaths = new TypstResourcePaths($this->paths, principalId: 1);
-    $this->factory = new TypstWorldFactory($this->resourcePaths);
+    $this->factory = new TypstWorldFactory($this->paths);
 });
 
-it('builds a world + compiler + inspector triple', function () {
+it('builds a world + compiler + inspector triple for the given principal', function () {
     if (!extension_loaded('typst')) {
         $this->markTestSkipped('ext-typst is not loaded');
     }
-    $stack = $this->factory->build();
+    $stack = $this->factory->build(1);
     expect($stack)->toHaveKeys(['world', 'compiler', 'inspector']);
     expect($stack['world'])->toBeInstanceOf(Typst\World::class);
     expect($stack['compiler'])->toBeInstanceOf(Typst\Compiler::class);
@@ -30,7 +30,7 @@ it('exposes the union of skill and principal font directories', function () {
     @mkdir($principalDir, 0o755, true);
     file_put_contents($principalDir . '/Test.otf', 'fake');
 
-    $dirs = $this->factory->fontDirs();
+    $dirs = $this->factory->fontDirs($this->resourcePaths);
     expect($dirs)->not->toBeEmpty();
     // Each entry must be an absolute realpath that exists.
     foreach ($dirs as $dir) {
@@ -48,7 +48,7 @@ it('always returns at least the plugin-shipped font directory', function () {
     // `fontDirs()` must always include this tier-1 dir regardless
     // of the operator's tier-2 state — that's the "Inter OFL is
     // always there" guarantee the README promises.
-    $dirs = $this->factory->fontDirs();
+    $dirs = $this->factory->fontDirs($this->resourcePaths);
     expect($dirs)->not->toBeEmpty();
     $realpathSkills = realpath($this->resourcePaths->skillFontDirectory());
     expect($realpathSkills)->not->toBeFalse();

@@ -7,7 +7,6 @@ use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\DataUrlAssetStore;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -35,10 +34,7 @@ beforeEach(function () {
         $this->principalService,
     );
 
-    $paths = new TypstResourcePaths(
-        new Spora\Core\Paths(sys_get_temp_dir()),
-        principalId: 1,
-    );
+    $paths = new Spora\Core\Paths(sys_get_temp_dir());
     $this->worldFactory = new TypstWorldFactory($paths);
 
     $this->compileController = new TypstCompileController(
@@ -329,6 +325,84 @@ it('DELETE /typst/sources/{id} removes the parent and its derivatives', function
     expect($resp->getStatusCode())->toBe(204);
 
     expect(MediaAsset::query()->find($parent->id))->toBeNull();
+});
+
+it('POST /typst/sources creates a fresh row without compiling', function () {
+    $req = Request::create(
+        '/api/v1/typst/sources',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'fresh.typ', 'content' => '= Hello, world!']),
+    );
+    $resp = $this->sourceController->store($req);
+    expect($resp->getStatusCode())->toBe(201);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['filename'])->toBe('fresh.typ');
+    expect($body['data']['byte_size'])->toBe(15);
+    expect($body['data']['id'])->toBeString()->not->toBe('');
+
+    $row = MediaAsset::query()->find($body['data']['id']);
+    expect($row)->not->toBeNull();
+    expect($row->tool_name)->toBe('typst.playground');
+    expect($row->mime_type)->toBe('text/x-typst');
+    expect($row->payload)->toBe('= Hello, world!');
+});
+
+it('POST /typst/sources auto-appends .typ when the filename lacks the suffix', function () {
+    $req = Request::create(
+        '/api/v1/typst/sources',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'draft', 'content' => '= draft']),
+    );
+    $resp = $this->sourceController->store($req);
+    expect($resp->getStatusCode())->toBe(201);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['filename'])->toBe('draft.typ');
+});
+
+it('POST /typst/sources rejects names with path separators', function () {
+    $req = Request::create(
+        '/api/v1/typst/sources',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'sub/dir.typ', 'content' => '= x']),
+    );
+    $resp = $this->sourceController->store($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+it('POST /typst/sources rejects a missing content field with 422', function () {
+    $req = Request::create(
+        '/api/v1/typst/sources',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'foo.typ']),
+    );
+    $resp = $this->sourceController->store($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+it('POST /typst/sources returns 409 when a row with the same filename already exists', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000001', (int) $this->auth->currentUserId(), $principalId, 'taken.typ', '= old');
+
+    $req = Request::create(
+        '/api/v1/typst/sources',
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'taken.typ', 'content' => '= new']),
+    );
+    $resp = $this->sourceController->store($req);
+    expect($resp->getStatusCode())->toBe(409);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('FILENAME_TAKEN');
 });
 
 it('POST /typst/compile auto-appends .typ to bare names without re-creating the row', function () {

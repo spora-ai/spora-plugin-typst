@@ -99,11 +99,18 @@ final class TypstImageStore
             if (!is_file($path)) {
                 continue;
             }
+            // The principal root is shared with templates/, examples/,
+            // and fonts/ subdirs (see TypstResourcePaths). Only surface
+            // files with an image extension so the listing doesn't
+            // include `.typ` source files or font binaries.
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            if (!isset(self::EXT_TO_MIME[$ext])) {
+                continue;
+            }
             $stat = @stat($path);
-            $mime = $this->mimeFromName($name);
             $out[] = [
                 'name'        => $name,
-                'mime'        => $mime ?? 'application/octet-stream',
+                'mime'        => self::EXT_TO_MIME[$ext],
                 'size'        => is_int($stat['size'] ?? null) ? $stat['size'] : 0,
                 'modified_at' => is_int($stat['mtime'] ?? null) ? $stat['mtime'] : 0,
             ];
@@ -209,12 +216,6 @@ final class TypstImageStore
     public static function isAllowedMime(string $mime): bool
     {
         return in_array(strtolower(trim($mime)), self::ALLOWED_MIMES, true);
-    }
-
-    private function mimeFromName(string $name): ?string
-    {
-        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-        return self::EXT_TO_MIME[$ext] ?? null;
     }
 
     /**

@@ -58,7 +58,7 @@ final class TypstInspectTool extends AbstractTypstTool
         }
 
         try {
-            $stack = $this->worldFactory->build();
+            $stack = $this->worldFactory->build($context?->principalId);
             $result = $stack['inspector']->inspectString($resolved['bytes']);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_inspect: ' . $e->getMessage());

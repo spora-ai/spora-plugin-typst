@@ -17,18 +17,20 @@ use Typst\World;
  * World config (mirrors the operator example in the user's spec):
  *
  *   `template_dir:  <storage>/typst/<principal>/`
- *     → parent of `templates/` and `examples/`, so
- *       `#include "templates/foo.typ"` and
- *       `#include "examples/bar.typ"` both resolve naturally under
- *       a single `template_dir` (ext-typst's API exposes one
- *       template_dir, not an array). Tier-1 (skill-shipped) templates
+ *     → per-principal root. Typst searches this directory for
+ *       `#include "templates/foo.typ"`, `#include "examples/bar.typ"`,
+ *       and `#image("basename.jpg")`. The first two are resolved via
+ *       the kind subdirs under the principal root; the third is
+ *       resolved directly because images are stored at the root
+ *       (not in an `images/` subdir — see {@see TypstResourcePaths}
+ *       for the rationale). Tier-1 (skill-shipped) templates
  *       live at `<plugin>/skills/typst/{templates,examples}/` and
  *       are surfaced as a parallel listing via the admin UI; they're
  *       NOT injected into the per-principal `template_dir` so
  *       operators can shadow a skill-shipped file by uploading one
  *       of the same name under their own principal.
  *
- *   `font_dirs:  [<plugin>/skills/typst/fonts/, <storage>/typst/fonts/<principal>/]`
+ *   `font_dirs:  [<plugin>/skills/typst/fonts/, <storage>/typst/<principal>/fonts/]`
  *     → ext-typst accepts an array; we list skill + principal. Typst
  *       searches both recursively. Tier-1 wins on basename collision
  *       because `font_dirs` earlier in the array is searched first
@@ -51,6 +53,18 @@ use Typst\World;
  * Rust state so each tool invocation gets a fresh one rather than
  * reusing across calls.
  *
+ * Principal scoping:
+ *   The factory is autowired as a singleton by PHP-DI at boot, with
+ *   no principal in scope (no request has been routed yet). The
+ *   constructor takes a {@see Paths} (not a {@see TypstResourcePaths})
+ *   so per-request callers — the {@see TypstCompileController}, the
+ *   `TypstRenderProducer`, the `TypstRenderTool`, the
+ *   `TypstInspectTool` — pass the resolved principal at
+ *   `build()` time. Without the principal, the world falls back to
+ *   the skill-shipped templates dir as the `template_dir`, which is
+ *   the right default for background workers / CLI runs but the
+ *   wrong default for any user-facing render.
+ *
  * @return array{world: World, compiler: Compiler, inspector: Inspector}
  */
 final class TypstWorldFactory
@@ -58,21 +72,28 @@ final class TypstWorldFactory
     private const CACHE_BYTES = 64 * 1024 * 1024;
 
     public function __construct(
-        private readonly TypstResourcePaths $paths,
+        private readonly \Spora\Core\Paths $paths,
     ) {}
 
     /**
+     * Build a World for the given principal. Pass `null` for
+     * background / CLI contexts where no principal is in scope — the
+     * world then resolves against the skill-shipped templates dir as
+     * a safe fallback (a principal-scoped render would not be safe
+     * there anyway because we have no principal to scope to).
+     *
      * @return array{world: World, compiler: Compiler, inspector: Inspector}
      */
-    public function build(): array
+    public function build(?int $principalId = null): array
     {
-        $templateDir = $this->templateDir();
-        $fontDirs     = $this->fontDirs();
+        $resourcePaths = new TypstResourcePaths($this->paths, $principalId);
+        $templateDir   = $this->templateDir($resourcePaths);
+        $fontDirs      = $this->fontDirs($resourcePaths);
 
         if ($fontDirs === []) {
             throw new RuntimeException(sprintf(
                 'TypstWorldFactory: no font directories are readable (skill="%s")',
-                $this->paths->skillFontDirectory(),
+                $resourcePaths->skillFontDirectory(),
             ));
         }
 
@@ -103,11 +124,12 @@ final class TypstWorldFactory
      *
      * @return list<string>
      */
-    public function fontDirs(): array
+    public function fontDirs(?TypstResourcePaths $paths = null): array
     {
-        $candidates = [$this->paths->skillFontDirectory()];
+        $paths ??= new TypstResourcePaths($this->paths);
+        $candidates = [$paths->skillFontDirectory()];
         try {
-            $candidates[] = $this->paths->principalFontDirectory();
+            $candidates[] = $paths->principalFontDirectory();
         } catch (RuntimeException) {
             // No principal scope — that's fine, the operator
             // simply hasn't uploaded any principal-tier fonts yet.
@@ -127,24 +149,24 @@ final class TypstWorldFactory
 
     /**
      * Template dir is the principal's per-principal root. Both
-     * `templates/` and `examples/` live under it; the LLM (and the
+     * `templates/` and `examples/` live under it, and images are
+     * stored directly under it (no `images/` subdir) so
+     * `#image("basename.jpg")` resolves there. The LLM (and the
      * playground) reference them with `#include "templates/foo.typ"`
-     * / `#include "examples/bar.typ"`.
+     * / `#include "examples/bar.typ"` and `#image("basename.jpg")`.
      *
-     * Falls back to the skill-shipped templates dir only when the
-     * `TypstResourcePaths` instance was constructed without a
-     * principal (PHP-DI autowires a singleton at boot before any
-     * request has resolved a principal). In that case we still
-     * produce a usable World against the skill-shipped content so
-     * `typst_inspect` / `typst_resources` calls don't fail in
-     * unprincipaled contexts (background workers, CLI).
+     * Falls back to the skill-shipped templates dir only when no
+     * principal is in scope (background workers, CLI). In that case
+     * we still produce a usable World against the skill-shipped
+     * content so `typst_inspect` / `typst_resources` calls don't
+     * fail in unprincipaled contexts.
      */
-    private function templateDir(): string
+    private function templateDir(TypstResourcePaths $paths): string
     {
         try {
-            return $this->paths->principalDirectory();
+            return $paths->principalDirectory();
         } catch (RuntimeException) {
-            return $this->paths->skillTemplateDirectory();
+            return $paths->skillTemplateDirectory();
         }
     }
 }

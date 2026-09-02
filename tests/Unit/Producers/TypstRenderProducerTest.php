@@ -13,7 +13,8 @@ beforeEach(function () {
     if (!extension_loaded('typst')) {
         $this->markTestSkipped('ext-typst is not loaded');
     }
-    $paths = new TypstResourcePaths(new Paths(sys_get_temp_dir()), principalId: 1);
+    $paths = new Paths(sys_get_temp_dir());
+    $this->resourcePaths = new TypstResourcePaths($paths, principalId: 1);
     $this->producer = new TypstRenderProducer(new TypstWorldFactory($paths));
 });
 

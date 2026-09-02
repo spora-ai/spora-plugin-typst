@@ -29,7 +29,7 @@ afterEach(function () {
     }
 });
 
-it('persists a PNG image under <storage>/typst/images/<principal>/', function () {
+it('persists a PNG image under <storage>/typst/<principal>/', function () {
     $png = base64_decode(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
     );
@@ -39,7 +39,9 @@ it('persists a PNG image under <storage>/typst/images/<principal>/', function ()
     expect($row['name'])->toBe('logo.png');
     expect($row['mime'])->toBe('image/png');
     expect($row['size'])->toBe(strlen($png));
-    expect(is_file($this->tempDir . '/storage/typst/images/7/logo.png'))->toBeTrue();
+    // Per-principal layout: images live directly under
+    // <storage>/typst/<principal>/, not in an images/ subdir.
+    expect(is_file($this->tempDir . '/storage/typst/7/logo.png'))->toBeTrue();
 });
 
 it('mints a sensible default filename when none is supplied', function () {
@@ -78,8 +80,8 @@ it('rejects an oversize payload', function () {
 it('isolates lists by principal_id', function () {
     // Write a file under principal 7 directly so we don't depend on
     // the public write() method's principal-resolution flow.
-    $dir7 = $this->tempDir . '/storage/typst/images/7';
-    $dir8 = $this->tempDir . '/storage/typst/images/8';
+    $dir7 = $this->tempDir . '/storage/typst/7';
+    $dir8 = $this->tempDir . '/storage/typst/8';
     mkdir($dir7, 0o755, true);
     mkdir($dir8, 0o755, true);
     file_put_contents($dir7 . '/a.png', 'x');
@@ -96,7 +98,7 @@ it('deletes an image by basename', function () {
     $this->store->write('x', 'image/png', 'doomed.png');
     $this->store->delete('doomed.png');
 
-    expect(is_file($this->tempDir . '/storage/typst/images/7/doomed.png'))->toBeFalse();
+    expect(is_file($this->tempDir . '/storage/typst/7/doomed.png'))->toBeFalse();
 });
 
 it('refuses to delete a missing image', function () {
