@@ -134,12 +134,14 @@ final class TypstPlugin extends AbstractPlugin
         // Playground — compile inline Typst source to PDF/PNG/SVG.
         $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], $auth);
 
-        // Playground source files — list/open/save/delete the .typ
-        // rows the compile endpoint materialises. The compile path
-        // upserts the parent row by (principal_id, tool_name,
+        // Playground source files — list/open/create/save/delete the
+        // .typ rows the compile endpoint materialises. The compile
+        // path upserts the parent row by (principal_id, tool_name,
         // filename); this controller surfaces the rest of the
-        // lifecycle (open, edit, delete) for the operator UI.
+        // lifecycle (create without rendering, open, edit, delete)
+        // for the operator UI.
         $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], $auth);
+        $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], $auth);
         $r->addRoute('GET', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'show'], $auth);
         $r->addRoute('PUT', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'update'], $auth);
         $r->addRoute('DELETE', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'destroy'], $auth);
