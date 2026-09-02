@@ -104,7 +104,7 @@ it('POST /typst/compile returns 401 when the session is wiped between requests',
 
 it('POST /typst/compile persists a valid PDF render and returns the asset_url', function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
@@ -129,7 +129,7 @@ it('POST /typst/compile persists a valid PDF render and returns the asset_url', 
 
 it('POST /typst/compile persists a PNG render and returns width + height', function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
@@ -154,7 +154,7 @@ it('POST /typst/compile persists a PNG render and returns width + height', funct
 
 it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);

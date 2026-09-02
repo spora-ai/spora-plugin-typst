@@ -11,7 +11,7 @@ use Spora\Plugins\Typst\Services\TypstWorldFactory;
 
 beforeEach(function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     $paths = new TypstResourcePaths(new Paths(sys_get_temp_dir()), principalId: 1);
     $this->producer = new TypstRenderProducer(new TypstWorldFactory($paths));

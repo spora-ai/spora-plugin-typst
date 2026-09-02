@@ -134,7 +134,6 @@ jobs:
           composer init --name=spora/test-skeleton --type=project --no-interaction --quiet
           composer config minimum-stability dev
           composer config prefer-stable true
-          composer config --json extra '{"merge-plugin":{"include":["vendor/spora-ai/spora-core/composer-extra.json"]}}'
           composer config allow-plugins.pestphp/pest-plugin true
           composer config allow-plugins.spora-ai/installer true
           composer config allow-plugins.composer/installers true

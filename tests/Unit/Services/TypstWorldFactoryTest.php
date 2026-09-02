@@ -14,7 +14,7 @@ beforeEach(function () {
 
 it('builds a world + compiler + inspector triple', function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     $stack = $this->factory->build();
     expect($stack)->toHaveKeys(['world', 'compiler', 'inspector']);

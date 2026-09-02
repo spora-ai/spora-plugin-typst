@@ -12,7 +12,7 @@ use Spora\Services\MediaArchive\MediaDerivativeService;
 
 beforeEach(function () {
     if (!extension_loaded('typst')) {
-        $this->skip(true, 'ext-typst is not loaded');
+        $this->markTestSkipped('ext-typst is not loaded');
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
