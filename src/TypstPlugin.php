@@ -13,6 +13,7 @@ use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
 use Spora\Plugins\Typst\Http\TypstImageController;
+use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstInspectTool;
@@ -81,14 +82,15 @@ final class TypstPlugin extends AbstractPlugin
     public function register(ContainerBuilder $builder): void
     {
         $builder->addDefinitions([
-            TypstFontController::class      => \DI\autowire(),
-            TypstTemplateController::class   => \DI\autowire(),
-            TypstExampleController::class    => \DI\autowire(),
-            TypstImageController::class     => \DI\autowire(),
-            TypstCompileController::class   => \DI\autowire(),
-            TypstRenderTool::class          => \DI\autowire(),
-            TypstInspectTool::class         => \DI\autowire(),
-            TypstResourcesTool::class       => \DI\autowire(),
+            TypstFontController::class             => \DI\autowire(),
+            TypstTemplateController::class         => \DI\autowire(),
+            TypstExampleController::class          => \DI\autowire(),
+            TypstImageController::class            => \DI\autowire(),
+            TypstCompileController::class          => \DI\autowire(),
+            TypstPlaygroundSourceController::class => \DI\autowire(),
+            TypstRenderTool::class                 => \DI\autowire(),
+            TypstInspectTool::class                => \DI\autowire(),
+            TypstResourcesTool::class              => \DI\autowire(),
         ]);
 
         // Idempotent — `MediaDerivativeProducerDiscovery::add()` no-ops
@@ -131,6 +133,16 @@ final class TypstPlugin extends AbstractPlugin
 
         // Playground — compile inline Typst source to PDF/PNG/SVG.
         $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], $auth);
+
+        // Playground source files — list/open/save/delete the .typ
+        // rows the compile endpoint materialises. The compile path
+        // upserts the parent row by (principal_id, tool_name,
+        // filename); this controller surfaces the rest of the
+        // lifecycle (open, edit, delete) for the operator UI.
+        $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'show'], $auth);
+        $r->addRoute('PUT', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'update'], $auth);
+        $r->addRoute('DELETE', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'destroy'], $auth);
     }
 
     /**
