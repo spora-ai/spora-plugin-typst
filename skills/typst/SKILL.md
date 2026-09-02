@@ -108,7 +108,11 @@ Successful renders return:
 
 ## Typst syntax primer (the minimum you need)
 
-Use Typst's markup, not LaTeX, not Markdown.
+Use Typst's markup, not LaTeX, not Markdown. For the canonical
+one-page reference of every feature below, read the bundled
+`examples/showcase.typ` — it renders a complete demo document
+and is the file the operator should `typst_inspect` first when
+in doubt about syntax.
 
 ```typst
 = Heading 1
@@ -146,8 +150,8 @@ Three resource kinds, two tiers each:
 | Kind        | Purpose                                                 | Tier 1 (skill-shipped, read-only)             | Tier 2 (principal, writable)                  |
 |-------------|---------------------------------------------------------|----------------------------------------------|------------------------------------------------|
 | `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter OFL)   | `<storage>/typst/fonts/<principal>/`           |
-| `template`  | Full document skeletons (e.g. invoice, letter)           | `<plugin>/skills/typst/templates/` (invoice) | `<storage>/typst/templates/<principal>/`       |
-| `example`   | Pattern snippets the LLM cribs from (headings, tables…) | `<plugin>/skills/typst/examples/` (headings)  | `<storage>/typst/examples/<principal>/`        |
+| `template`  | Full document skeletons the agent composes from data     | `<plugin>/skills/typst/templates/` (report)   | `<storage>/typst/templates/<principal>/`       |
+| `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<plugin>/skills/typst/examples/` (showcase) | `<storage>/typst/examples/<principal>/`        |
 | `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/images/<principal>/`         |
 
 Resources are listed with `typst_resources(action="resources_list", kind="<kind>")`.
