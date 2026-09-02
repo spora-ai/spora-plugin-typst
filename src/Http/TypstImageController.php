@@ -8,6 +8,7 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Services\PrincipalService;
@@ -35,6 +36,8 @@ final class TypstImageController
 {
     use JsonControllerHelpers;
 
+    private const MESSAGE_AUTHENTICATION_REQUIRED = 'Authentication required';
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
@@ -48,7 +51,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -56,7 +59,7 @@ final class TypstImageController
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
         $rows = $this->storeForPrincipal($principalId)->list();
-        $buildUrl = fn(string $name): string => $this->publicUrlFor($principalId, $name);
+        $buildUrl = fn(string $name): string => $this->publicUrlFor($name);
 
         return new JsonResponse([
             'data' => [
@@ -143,7 +146,7 @@ final class TypstImageController
                     'mime'        => $row['mime'],
                     'size'        => $row['size'],
                     'modified_at' => $row['modified_at'],
-                    'url'         => $this->publicUrlFor($principalId, $row['name']),
+                    'url'         => $this->publicUrlFor($row['name']),
                 ],
             ],
         ], Response::HTTP_CREATED);
@@ -168,7 +171,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         return $this->storeForPrincipal($this->principalIdForCurrentUser());
     }
@@ -183,7 +186,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         return $this->principals->ensureUserPrincipal($userId)->id;
     }
@@ -196,12 +199,12 @@ final class TypstImageController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }
 
-    private function publicUrlFor(int $principalId, string $name): string
+    private function publicUrlFor(string $name): string
     {
         return '/api/v1/typst/images/' . rawurlencode($name);
     }

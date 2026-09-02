@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
-use InvalidArgumentException;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaType;
@@ -71,7 +71,7 @@ abstract class AbstractTypstTool extends AbstractTool
             return $this->loadAssetSource($fileId, $context, $userId);
         }
 
-        throw new InvalidArgumentException(
+        throw new TypstInvalidArgumentException(
             'Typst tool: either `source` (inline string) or `file` (media asset id) is required',
         );
     }
@@ -80,22 +80,22 @@ abstract class AbstractTypstTool extends AbstractTool
     {
         $asset = MediaAsset::query()->find($fileId);
         if ($asset === null) {
-            throw new RuntimeException(sprintf('Typst tool: media asset "%s" not found', $fileId));
+            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not found', $fileId));
         }
         if (!$this->assetIsVisibleTo($asset, $context, $userId)) {
-            throw new RuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
+            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
         }
 
         $bytes = match ($asset->storage_mode) {
             'data_url' => is_string($asset->payload) ? $asset->payload : '',
             'local'    => $this->readLocalAsset($asset),
-            default    => throw new RuntimeException(sprintf(
+            default    => throw new TypstRuntimeException(sprintf(
                 'Typst tool: cannot read storage_mode "%s"',
                 (string) $asset->storage_mode,
             )),
         };
         if ($bytes === '') {
-            throw new RuntimeException('Typst tool: asset has empty bytes');
+            throw new TypstRuntimeException('Typst tool: asset has empty bytes');
         }
         return [
             'bytes'  => $bytes,
@@ -135,7 +135,7 @@ abstract class AbstractTypstTool extends AbstractTool
     {
         $token = $asset->asset_token;
         if (!is_string($token) || $token === '') {
-            throw new RuntimeException('Typst tool: asset has no token');
+            throw new TypstRuntimeException('Typst tool: asset has no token');
         }
         $ext = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
         $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);

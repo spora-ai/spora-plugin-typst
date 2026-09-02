@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const IMAGE_STORE_PNG_MIME = 'image/png';
+
 use Spora\Core\Paths;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
@@ -35,9 +37,9 @@ it('persists a PNG image under <storage>/typst/<principal>/', function () {
     );
     expect($png)->not->toBeFalse();
 
-    $row = $this->store->write($png, 'image/png', 'logo.png');
+    $row = $this->store->write($png, IMAGE_STORE_PNG_MIME, 'logo.png');
     expect($row['name'])->toBe('logo.png');
-    expect($row['mime'])->toBe('image/png');
+    expect($row['mime'])->toBe(IMAGE_STORE_PNG_MIME);
     expect($row['size'])->toBe(strlen($png));
     // Per-principal layout: images live directly under
     // <storage>/typst/<principal>/, not in an images/ subdir.
@@ -46,7 +48,7 @@ it('persists a PNG image under <storage>/typst/<principal>/', function () {
 
 it('mints a sensible default filename when none is supplied', function () {
     $png = "\x89PNG\r\n\x1a\n" . random_bytes(50);
-    $row = $this->store->write($png, 'image/png', null);
+    $row = $this->store->write($png, IMAGE_STORE_PNG_MIME, null);
 
     expect($row['name'])->toStartWith('typst-image-');
     expect($row['name'])->toEndWith('.png');
@@ -67,13 +69,13 @@ it('rejects an unsupported mime', function () {
 });
 
 it('rejects an empty payload', function () {
-    expect(fn() => $this->store->write('', 'image/png', 'logo.png'))
+    expect(fn() => $this->store->write('', IMAGE_STORE_PNG_MIME, 'logo.png'))
         ->toThrow(RuntimeException::class, 'empty payload');
 });
 
 it('rejects an oversize payload', function () {
     $big = str_repeat('a', TypstImageStore::MAX_BYTES + 1);
-    expect(fn() => $this->store->write($big, 'image/png', 'big.png'))
+    expect(fn() => $this->store->write($big, IMAGE_STORE_PNG_MIME, 'big.png'))
         ->toThrow(RuntimeException::class, 'exceeds');
 });
 
@@ -95,7 +97,7 @@ it('isolates lists by principal_id', function () {
 });
 
 it('deletes an image by basename', function () {
-    $this->store->write('x', 'image/png', 'doomed.png');
+    $this->store->write('x', IMAGE_STORE_PNG_MIME, 'doomed.png');
     $this->store->delete('doomed.png');
 
     expect(is_file($this->tempDir . '/storage/typst/7/doomed.png'))->toBeFalse();

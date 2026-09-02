@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const RESOURCE_STORE_FONT_PATH = '/storage/typst/42/fonts/Inter-Black.otf';
+
 use Spora\Core\Paths;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
@@ -12,7 +14,7 @@ beforeEach(function () {
     @mkdir($this->base . '/storage/typst/42/fonts', 0o755, true);
     @mkdir($this->base . '/storage/typst/42/examples', 0o755, true);
     @mkdir($this->base . '/storage/typst/99/fonts', 0o755, true);
-    file_put_contents($this->base . '/storage/typst/42/fonts/Inter-Black.otf', 'fake-font-bytes');
+    file_put_contents($this->base . RESOURCE_STORE_FONT_PATH, 'fake-font-bytes');
     file_put_contents($this->base . '/storage/typst/99/fonts/Other.otf', 'different-principal');
     file_put_contents($this->base . '/storage/typst/42/examples/invoice.typ', '= Invoice\n');
 
@@ -22,7 +24,7 @@ beforeEach(function () {
 });
 
 afterEach(function () {
-    @unlink($this->base . '/storage/typst/42/fonts/Inter-Black.otf');
+    @unlink($this->base . RESOURCE_STORE_FONT_PATH);
     @unlink($this->base . '/storage/typst/99/fonts/Other.otf');
     @unlink($this->base . '/storage/typst/42/examples/invoice.typ');
     @rmdir($this->base . '/storage/typst/42/fonts');
@@ -97,5 +99,5 @@ it('deletes a principal-tier resource', function () {
     $this->store->delete(TypstResourcePaths::KIND_FONT, 'Inter-Black.otf');
     expect($this->store->read(TypstResourcePaths::KIND_FONT, 'Inter-Black.otf'))->toBeNull();
     // re-create for afterEach cleanup
-    file_put_contents($this->base . '/storage/typst/42/fonts/Inter-Black.otf', 'fake-font-bytes');
+    file_put_contents($this->base . RESOURCE_STORE_FONT_PATH, 'fake-font-bytes');
 });

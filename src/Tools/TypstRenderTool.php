@@ -158,7 +158,7 @@ final class TypstRenderTool extends AbstractTypstTool
             // the link with a first-page PNG preview so the user sees
             // the result inline. The PNG is produced via the same
             // producer path and persisted as a sibling derivative.
-            $previewUrl = $this->firstPagePngUrl($resolved['parent'], $derivative->id);
+            $previewUrl = $this->firstPagePngUrl($resolved['parent']);
             $content = $previewUrl !== ''
                 ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
                 : sprintf("[Open PDF](%s)", $url);
@@ -203,7 +203,7 @@ final class TypstRenderTool extends AbstractTypstTool
      * The PNG is stored as a separate derivative under the same
      * parent so it shows up in the Versions UI too.
      */
-    private function firstPagePngUrl(MediaAsset $parent, string $derivativeId): string
+    private function firstPagePngUrl(MediaAsset $parent): string
     {
         $producer = $this->findProducer();
         if ($producer === null) {

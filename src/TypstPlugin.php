@@ -63,6 +63,8 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  */
 final class TypstPlugin extends AbstractPlugin
 {
+    private const SOURCES_ROUTE_PATTERN = '/api/v1/typst/sources/{id}';
+
     public function getName(): string
     {
         return (new TypstApp())->displayName();
@@ -142,9 +144,9 @@ final class TypstPlugin extends AbstractPlugin
         // for the operator UI.
         $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], $auth);
         $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'show'], $auth);
-        $r->addRoute('PUT', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'update'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'destroy'], $auth);
+        $r->addRoute('GET', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'show'], $auth);
+        $r->addRoute('PUT', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'update'], $auth);
+        $r->addRoute('DELETE', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'destroy'], $auth);
     }
 
     /**

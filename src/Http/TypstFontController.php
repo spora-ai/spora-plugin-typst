@@ -7,6 +7,7 @@ namespace Spora\Plugins\Typst\Http;
 use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Services\PrincipalService;
@@ -55,7 +56,7 @@ final class TypstFontController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException('Authentication required');
         }
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -154,7 +155,7 @@ final class TypstFontController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException('Authentication required');
         }
         $principalId = $this->principals->ensureUserPrincipal($userId)->id;
         $paths = new TypstResourcePaths($this->paths(), $principalId);
@@ -190,7 +191,7 @@ final class TypstFontController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }

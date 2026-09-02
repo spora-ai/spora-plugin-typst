@@ -24,14 +24,6 @@ parameters:
         # Expectation. PHPStan can't statically prove `->not`
         # resolves on every chain target.
         - '#Access to an undefined property Pest\\Mixins\\Expectation#'
-        # Stub constructors carry every parameter the real ext-typst
-        # class accepts (so PHPStan matches callers' named-argument
-        # shape) but the bodies never read them — flagged as
-        # `constructor.unusedParameter`. Suppress only inside the
-        # stubs/ tree.
-        -
-            path: stubs/typst.php
-            message: '#Constructor of class Typst.*has an unused parameter#'
         # `$this->markTestSkipped(...)` is a PHPUnit TestCase method
         # that Pest proxies inside its closures. PHPStan statically
         # reads `$this` as `Pest\PendingCalls\TestCall` and can't
