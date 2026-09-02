@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Plugins\Typst\Http;
 
 use Illuminate\Database\Capsule\Manager as Capsule;
+use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
@@ -30,15 +31,18 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Routes:
  *
- *   GET    /api/v1/typst/sources            — list (filename + size + mtime)
- *   GET    /api/v1/typst/sources/{id}       — fetch source bytes
- *   PUT    /api/v1/typst/sources/{id}       — save edits (no compile)
- *   DELETE /api/v1/typst/sources/{id}       — delete source + derivatives
+ *   GET    /api/v1/typst/sources[?principal_id=N]  — list (filename + size + mtime)
+ *   GET    /api/v1/typst/sources/{id}[?principal_id=N]      — fetch source bytes
+ *   PUT    /api/v1/typst/sources/{id}[?principal_id=N]      — save edits (no compile)
+ *   DELETE /api/v1/typst/sources/{id}[?principal_id=N]      — delete source + derivatives
  *
- * All routes scope to the caller's user-principal so a user can't
- * list / read / write / delete another user's files. Out-of-scope
- * ids surface as 404, not 403, so the existence of someone else's
- * file isn't leaked through the API.
+ * All routes scope to the caller's user-principal by default. The
+ * `?principal_id=N` query param is honoured when set, but the
+ * requested principal is intersected with the caller's visible
+ * principals (user-principal + group-principals the user belongs
+ * to) server-side so a user can never reach a principal they
+ * can't act as. Out-of-scope ids surface as 404, not 403, so the
+ * existence of someone else's file isn't leaked through the API.
  */
 final class TypstPlaygroundSourceController
 {
@@ -50,9 +54,7 @@ final class TypstPlaygroundSourceController
     ) {}
 
     /**
-     * GET /api/v1/typst/sources
-     *
-     * @return JsonResponse
+     * GET /api/v1/typst/sources[?principal_id=N]
      */
     public function index(Request $request): JsonResponse
     {
@@ -61,9 +63,14 @@ final class TypstPlaygroundSourceController
             return $this->unauthenticated();
         }
 
-        $principal = $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
+
         $rows = MediaAsset::query()
-            ->where('principal_id', (int) $principal->id)
+            ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
             ->where('mime_type', 'text/x-typst')
             ->orderBy('updated_at', 'desc')
@@ -85,7 +92,7 @@ final class TypstPlaygroundSourceController
     }
 
     /**
-     * GET /api/v1/typst/sources/{id}
+     * GET /api/v1/typst/sources/{id}[?principal_id=N]
      */
     public function show(Request $request): JsonResponse
     {
@@ -115,7 +122,7 @@ final class TypstPlaygroundSourceController
     }
 
     /**
-     * PUT /api/v1/typst/sources/{id}
+     * PUT /api/v1/typst/sources/{id}[?principal_id=N]
      *
      * Persist source edits without re-rendering. Strips existing
      * derivatives so a stale render doesn't outlive its source.
@@ -163,7 +170,7 @@ final class TypstPlaygroundSourceController
     }
 
     /**
-     * DELETE /api/v1/typst/sources/{id}
+     * DELETE /api/v1/typst/sources/{id}[?principal_id=N]
      *
      * Remove the source row and any derivatives linked to it. The
      * `media_assets` row + `media_derivatives` join + derivative
@@ -188,20 +195,30 @@ final class TypstPlaygroundSourceController
     }
 
     /**
-     * Resolve the parent row by `id` and confirm the caller's principal
+     * Resolve the parent row by `id` and confirm the requested principal
      * owns it. Returns a 404 if the row is missing OR out of scope —
-     * we don't want to leak the existence of another user's files.
+     * we don't want to leak the existence of another principal's files.
+     *
+     * The "requested principal" comes from `?principal_id=N` when
+     * present, otherwise the caller's user-principal. The visible-
+     * principals check in {@see resolvePrincipalId()} gates the
+     * request so the user can't reach a principal they can't act as.
      */
     private function resolveOwnedSource(Request $request, int $userId): MediaAsset|JsonResponse
     {
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
+
         $id = (string) $request->attributes->get('id', '');
         if ($id === '') {
             return $this->notFound('NOT_FOUND', 'source not found');
         }
-        $principal = $this->principals->ensureUserPrincipal($userId);
         $asset = MediaAsset::query()
             ->where('id', $id)
-            ->where('principal_id', (int) $principal->id)
+            ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
             ->where('mime_type', 'text/x-typst')
             ->first();
@@ -209,6 +226,24 @@ final class TypstPlaygroundSourceController
             return $this->notFound('NOT_FOUND', 'source not found');
         }
         return $asset;
+    }
+
+    /**
+     * Honour `?principal_id=N` when supplied; otherwise default to
+     * the caller's user-principal. Out-of-scope ids surface as a
+     * RuntimeException so the caller can map them to a 404.
+     */
+    private function resolvePrincipalId(Request $request, int $userId): int
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested === null || $requested === '') {
+            return (int) $this->principals->ensureUserPrincipal($userId)->id;
+        }
+        $requestedId = (int) $requested;
+        if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+            throw new RuntimeException('Principal not visible to caller');
+        }
+        return $requestedId;
     }
 
     /**

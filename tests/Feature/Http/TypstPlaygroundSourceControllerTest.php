@@ -362,3 +362,144 @@ it('POST /typst/compile auto-appends .typ to bare names without re-creating the 
     $secondBody = json_decode((string) $secondResp->getContent(), true);
     expect($secondBody['data']['source_id'])->toBe($firstId);
 });
+
+it('GET /typst/sources?principal_id=N scopes the listing to that principal', function () {
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    // No-op: visibility check happens against the resolved principal,
+    // not the caller — list() doesn't gate on visibility.
+
+    // Spin up a group the caller owns (and is auto-added as a
+    // member of) and seed a row under the group's principal. The
+    // caller's user-principal also has a row — the listing should
+    // distinguish the two.
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForSources');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000001', $userId, $userPrincipalId, 'mine.typ', '= User row');
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000002', $userId, $groupPrincipalId, 'group.typ', '= Group row');
+
+    // Default (no principal_id) → user-principal only.
+    $defaultResp = $this->sourceController->index(Request::create('/api/v1/typst/sources', 'GET'));
+    $defaultBody = json_decode((string) $defaultResp->getContent(), true);
+    $defaultNames = array_column($defaultBody['data']['sources'], 'filename');
+    expect($defaultNames)->toContain('mine.typ')->not->toContain('group.typ');
+
+    // ?principal_id=<group> → group rows only.
+    $groupReq = Request::create('/api/v1/typst/sources?principal_id=' . $groupPrincipalId, 'GET');
+    $groupResp = $this->sourceController->index($groupReq);
+    $groupBody = json_decode((string) $groupResp->getContent(), true);
+    $groupNames = array_column($groupBody['data']['sources'], 'filename');
+    expect($groupNames)->toContain('group.typ')->not->toContain('mine.typ');
+});
+
+it('GET /typst/sources?principal_id=N returns 404 for an out-of-scope principal', function () {
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create('/api/v1/typst/sources?principal_id=' . $otherPrincipalId, 'GET');
+    $resp = $this->sourceController->index($req);
+
+    expect($resp->getStatusCode())->toBe(404);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('NOT_FOUND');
+});
+
+it('GET /typst/sources/{id}?principal_id=N reads the row under that principal', function () {
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    $this->principalService->ensureUserPrincipal($userId); // make user principal visible
+
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForShow');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    seedPlaygroundSource('22222222-2222-2222-2222-000000000001', $userId, $userPrincipalId, 'mine.typ', '= User');
+    seedPlaygroundSource('22222222-2222-2222-2222-000000000002', $userId, $groupPrincipalId, 'group.typ', '= Group');
+
+    // Default principal (user) → only the user row is reachable.
+    $defaultReq = Request::create('/api/v1/typst/sources/22222222-2222-2222-2222-000000000001', 'GET');
+    $defaultReq->attributes->set('id', '22222222-2222-2222-2222-000000000001');
+    $defaultResp = $this->sourceController->show($defaultReq);
+    expect($defaultResp->getStatusCode())->toBe(200);
+
+    // ?principal_id=<group> → reaches the group row.
+    $groupReq = Request::create(
+        '/api/v1/typst/sources/22222222-2222-2222-2222-000000000002?principal_id=' . $groupPrincipalId,
+        'GET',
+    );
+    $groupReq->attributes->set('id', '22222222-2222-2222-2222-000000000002');
+    $groupResp = $this->sourceController->show($groupReq);
+    expect($groupResp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $groupResp->getContent(), true);
+    expect($body['data']['content'])->toBe('= Group');
+});
+
+it('GET /typst/sources/{id}?principal_id=N returns 404 when the row lives under a different principal', function () {
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    $this->principalService->ensureUserPrincipal($userId); // make user principal visible
+
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForMismatch');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    // Row lives under the user-principal; ask for it under the group.
+    seedPlaygroundSource('33333333-3333-3333-3333-000000000001', $userId, $userPrincipalId, 'mine.typ', '= User');
+
+    $req = Request::create(
+        '/api/v1/typst/sources/33333333-3333-3333-3333-000000000001?principal_id=' . $groupPrincipalId,
+        'GET',
+    );
+    $req->attributes->set('id', '33333333-3333-3333-3333-000000000001');
+    $resp = $this->sourceController->show($req);
+    expect($resp->getStatusCode())->toBe(404);
+});
+
+it('PUT /typst/sources/{id}?principal_id=N persists edits under the right principal', function () {
+    $userId = (int) $this->auth->currentUserId();
+    // Materialise the user-principal so the visibility check sees it
+    // (createGroup below adds the owner as a group member, so the
+    // group-principal becomes visible too).
+    $this->principalService->ensureUserPrincipal($userId);
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForUpdate');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    seedPlaygroundSource('44444444-4444-4444-4444-000000000001', $userId, $groupPrincipalId, 'group.typ', '= Before');
+
+    $req = Request::create(
+        '/api/v1/typst/sources/44444444-4444-4444-4444-000000000001?principal_id=' . $groupPrincipalId,
+        'PUT',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['content' => '= After']),
+    );
+    $req->attributes->set('id', '44444444-4444-4444-4444-000000000001');
+    $resp = $this->sourceController->update($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $reloaded = MediaAsset::query()->find('44444444-4444-4444-4444-000000000001');
+    expect($reloaded->payload)->toBe('= After');
+    expect($reloaded->principal_id)->toBe($groupPrincipalId);
+});
+
+it('DELETE /typst/sources/{id}?principal_id=N removes the row scoped to that principal', function () {
+    $userId = (int) $this->auth->currentUserId();
+    $this->principalService->ensureUserPrincipal($userId);
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForDelete');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    seedPlaygroundSource('55555555-5555-5555-5555-000000000001', $userId, $groupPrincipalId, 'group.typ', '= Hi');
+
+    $req = Request::create(
+        '/api/v1/typst/sources/55555555-5555-5555-5555-000000000001?principal_id=' . $groupPrincipalId,
+        'DELETE',
+    );
+    $req->attributes->set('id', '55555555-5555-5555-5555-000000000001');
+    $resp = $this->sourceController->destroy($req);
+    expect($resp->getStatusCode())->toBe(204);
+
+    expect(MediaAsset::query()->find('55555555-5555-5555-5555-000000000001'))->toBeNull();
+});
