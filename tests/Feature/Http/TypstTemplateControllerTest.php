@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 const TEMPLATES_PATH = '/api/v1/typst/templates';
-const JSON_MIME = 'application/json';
+const TEMPLATE_JSON_MIME = 'application/json';
 
 use Spora\Core\Paths;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
@@ -87,7 +87,7 @@ it('POST /typst/templates writes a template to <storage>/typst/<principal>/templ
     $req = Request::create(
         TEMPLATES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME],
         content: json_encode(['name' => 'letter.typ', 'content' => '= Letter']),
     );
     $resp = $this->controller->store($req);
@@ -132,7 +132,7 @@ it('POST /typst/templates validates the basename and content', function () {
     $req = Request::create(
         TEMPLATES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => JSON_MIME],
+        server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME],
         content: json_encode(['name' => '', 'content' => '']),
     );
     $resp = $this->controller->store($req);
