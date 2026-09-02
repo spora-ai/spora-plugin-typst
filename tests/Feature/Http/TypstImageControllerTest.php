@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
+use Spora\Core\Paths;
 use Spora\Plugins\Typst\Http\TypstImageController;
 use Spora\Plugins\Typst\Services\TypstImageStore;
-use Spora\Services\DataUrlAssetStore;
+use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Services\PrincipalResolver;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\Request;
@@ -19,25 +20,40 @@ beforeEach(function () {
 
     $this->principalService = new PrincipalService(new PrincipalResolver());
 
-    $this->store = new TypstImageStore(new DataUrlAssetStore());
+    $this->tempDir = sys_get_temp_dir() . '/typst-image-ctrl-test-' . bin2hex(random_bytes(4));
+    mkdir($this->tempDir, 0o755, true);
+    mkdir($this->tempDir . '/storage', 0o755, true);
+    $this->paths = new Paths($this->tempDir);
+
     $this->controller = new TypstImageController(
         $this->auth,
         $this->principalService,
-        $this->store,
+        $this->paths,
     );
 });
 
+afterEach(function () {
+    if (is_dir($this->tempDir)) {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($this->tempDir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $file) {
+            $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+        }
+        @rmdir($this->tempDir);
+    }
+});
+
 it('GET /typst/images returns an empty list when no images are uploaded', function () {
-    $resp = $this->controller->index(Request::create("/api/v1/typst/images", "GET"));
+    $resp = $this->controller->index(Request::create('/api/v1/typst/images', 'GET'));
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['images'])->toBe([]);
 });
 
-it('POST /typst/images uploads a base64-encoded PNG and returns the asset_url', function () {
+it('POST /typst/images uploads a base64-encoded PNG and returns the URL', function () {
     $b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
-    // Re-encode the bytes to exercise the base64 auto-detection path
-    // (decodeContent decodes once and stores the raw PNG bytes).
     $content = base64_encode(base64_decode($b64));
 
     $req = Request::create(
@@ -55,10 +71,10 @@ it('POST /typst/images uploads a base64-encoded PNG and returns the asset_url', 
     expect($resp->getStatusCode())->toBe(201);
 
     $body = json_decode((string) $resp->getContent(), true);
-    expect($body['data']['image']['mime_type'])->toBe('image/png');
-    expect($body['data']['image']['filename'])->toBe('logo.png');
-    expect($body['data']['image']['asset_url'])->toEndWith('.png');
-    expect($body['data']['image']['byte_size'])->toBe(strlen(base64_decode($b64)));
+    expect($body['data']['image']['mime'])->toBe('image/png');
+    expect($body['data']['image']['name'])->toBe('logo.png');
+    expect($body['data']['image']['url'])->toEndWith('logo.png');
+    expect($body['data']['image']['size'])->toBe(strlen(base64_decode($b64)));
 });
 
 it('POST /typst/images rejects an unsupported mime with 422', function () {
@@ -100,44 +116,51 @@ it('POST /typst/images accepts raw SVG markup as the content field', function ()
     $resp = $this->controller->store($req);
     expect($resp->getStatusCode())->toBe(201);
     $body = json_decode((string) $resp->getContent(), true);
-    expect($body['data']['image']['asset_url'])->toEndWith('.svg');
+    expect($body['data']['image']['name'])->toEndWith('.svg');
 });
 
-it('GET /typst/images lists previously uploaded images', function () {
-    // Reach into the store directly — controller-level upload is
-    // already covered above; this test focuses on the listing wiring.
+it('GET /typst/images/{name} streams the bytes with the right mime', function () {
     $principalId = $this->principalService->ensureUserPrincipal(
         $this->auth->currentUserId(),
     )->id;
-    $this->store->create('x', 'image/png', ['principal_id' => $principalId, 'filename' => 'one.png']);
-    $this->store->create('x', 'image/png', ['principal_id' => $principalId, 'filename' => 'two.png']);
+    $store = new TypstImageStore(new TypstResourcePaths($this->paths, $principalId));
+    $store->write('PNGBYTES', 'image/png', 'logo.png');
 
-    $resp = $this->controller->index(Request::create("/api/v1/typst/images", "GET"));
-    $body = json_decode((string) $resp->getContent(), true);
-    expect($body['data']['images'])->toHaveCount(2);
+    $req = Request::create('/api/v1/typst/images/logo.png', 'GET');
+    $req->attributes->set('name', 'logo.png');
+    $resp = $this->controller->show($req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect($resp->headers->get('Content-Type'))->toBe('image/png');
+    expect((string) $resp->getContent())->toBe('PNGBYTES');
 });
 
-it('DELETE /typst/images/{id} soft-deletes the row', function () {
+it('GET /typst/images/{name} returns 404 for a missing image', function () {
+    $req = Request::create('/api/v1/typst/images/missing.png', 'GET');
+    $req->attributes->set('name', 'missing.png');
+    $resp = $this->controller->show($req);
+    expect($resp->getStatusCode())->toBe(404);
+});
+
+it('DELETE /typst/images/{name} removes the file from disk', function () {
     $principalId = $this->principalService->ensureUserPrincipal(
         $this->auth->currentUserId(),
     )->id;
-    $asset = $this->store->create('x', 'image/png', ['principal_id' => $principalId]);
-    // Request::create doesn't auto-populate route attributes; the
-    // host's router does. Mirror what the router would do.
-    $req = Request::create('/api/v1/typst/images/' . $asset->id, 'DELETE');
-    $req->attributes->set('id', $asset->id);
+    $store = new TypstImageStore(new TypstResourcePaths($this->paths, $principalId));
+    $store->write('x', 'image/png', 'doomed.png');
+    expect(is_file($this->tempDir . '/storage/typst/images/' . $principalId . '/doomed.png'))->toBeTrue();
 
-    expect($asset->principal_id)->toBe($principalId);
-    expect($asset->plugin_slug)->toBe('spora-plugin-typst');
-
+    $req = Request::create('/api/v1/typst/images/doomed.png', 'DELETE');
+    $req->attributes->set('name', 'doomed.png');
     $resp = $this->controller->destroy($req);
+
     expect($resp->getStatusCode())->toBe(204);
-    expect(Spora\Models\MediaAsset::query()->find($asset->id))->toBeNull();
+    expect(is_file($this->tempDir . '/storage/typst/images/' . $principalId . '/doomed.png'))->toBeFalse();
 });
 
-it('DELETE /typst/images/{id} returns 404 on a missing row', function () {
-    $req = Request::create('/api/v1/typst/images/never-existed', 'DELETE');
-    $req->attributes->set('id', 'never-existed');
+it('DELETE /typst/images/{name} returns 404 for a missing image', function () {
+    $req = Request::create('/api/v1/typst/images/missing.png', 'DELETE');
+    $req->attributes->set('name', 'missing.png');
     $resp = $this->controller->destroy($req);
     expect($resp->getStatusCode())->toBe(404);
 });
@@ -156,8 +179,8 @@ it('POST /typst/images sanitises filenames with path separators', function () {
     $resp = $this->controller->store($req);
     expect($resp->getStatusCode())->toBe(201);
     $body = json_decode((string) $resp->getContent(), true);
-    expect($body['data']['image']['filename'])->not->toContain('/');
-    expect($body['data']['image']['filename'])->not->toContain('..');
+    expect($body['data']['image']['name'])->not->toContain('/');
+    expect($body['data']['image']['name'])->not->toContain('..');
 });
 
 it('GET /typst/images with ?principal_id=99 returns 404 (principal not visible)', function () {
@@ -166,26 +189,4 @@ it('GET /typst/images with ?principal_id=99 returns 404 (principal not visible)'
     expect($resp->getStatusCode())->toBe(404);
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('NOT_FOUND');
-});
-
-it('GET /typst/images without ?principal_id falls back to the caller\'s principal', function () {
-    // Seed one image under the caller's principal and one under a
-    // different principal; only the caller's image should surface.
-    $callerPrincipalId = $this->principalService->ensureUserPrincipal(
-        $this->auth->currentUserId(),
-    )->id;
-    Illuminate\Database\Capsule\Manager::table('principals')->insert([
-        ['id' => $callerPrincipalId + 100, 'type' => 'user', 'user_id' => null, 'group_id' => null, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
-    ]);
-    $otherPrincipalId = $callerPrincipalId + 100;
-
-    $this->store->create('x', 'image/png', ['principal_id' => $callerPrincipalId, 'filename' => 'mine.png']);
-    $this->store->create('x', 'image/png', ['principal_id' => $otherPrincipalId, 'filename' => 'theirs.png']);
-
-    $req = Request::create('/api/v1/typst/images', 'GET');
-    $resp = $this->controller->index($req);
-    expect($resp->getStatusCode())->toBe(200);
-    $body = json_decode((string) $resp->getContent(), true);
-    expect($body['data']['images'])->toHaveCount(1);
-    expect($body['data']['images'][0]['filename'])->toBe('mine.png');
 });

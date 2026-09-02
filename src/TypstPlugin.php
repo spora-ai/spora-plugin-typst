@@ -13,6 +13,7 @@ use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
 use Spora\Plugins\Typst\Http\TypstImageController;
+use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstInspectTool;
 use Spora\Plugins\Typst\Tools\TypstRenderTool;
@@ -23,26 +24,41 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  * Plugin entry point for `spora-plugin-typst`.
  *
  * Contributes one admin app (TypstApp), three LLM-callable tools
- * (`typst_render`, `typst_inspect`, `typst_resources`), seven REST
- * routes under `/api/v1/typst/{fonts,examples,images}*` plus
- * `POST /api/v1/typst/compile`, the `TypstRenderProducer`
- * (registered with the media-derivatives discovery registry), DI
- * bindings for the controllers and tools, the `skills/typst/`
- * directory (Inter OFL fonts + a starter invoice example), and the
- * `typst-assistant` agent template.
+ * (`typst_render`, `typst_inspect`, `typst_resources`), nine REST
+ * routes under `/api/v1/typst/{fonts,templates,examples,images,compile}*`,
+ * the `TypstRenderProducer` (registered with the media-derivatives
+ * discovery registry), DI bindings for the controllers and tools, the
+ * `skills/typst/` directory (Inter OFL fonts + a starter invoice
+ * template + a headings example), and the `typst-assistant` agent
+ * template.
  *
  * Architectural invariants:
  *
- *   - The plugin does **not** depend on `spora-plugin-media-archive`.
- *     `typst_render` calls `MediaDerivativeService::create()` directly
- *     via PHP — no HTTP hop into Media Archive routes — and the
- *     derivatives surface in chat via `MediaEmbed` referencing core's
- *     `/api/v1/assets/<uuid>.<ext>` route.
+ *   - **Inputs on the filesystem, outputs in the media archive.**
+ *     Fonts, templates, examples, and images live as plain files in
+ *     `<storage>/typst/<principal>/{fonts,templates,examples,images}/`.
+ *     They do NOT pollute the media archive. Only the rendered Typst
+ *     OUTPUTS (PDF/PNG/SVG) flow through `MediaDerivativeService` →
+ *     `media_assets` → the chat's `MediaEmbed` markdown — mirroring
+ *     how a chat tool's outputs naturally belong in the media
+ *     library while its input material does not.
  *
- *   - The plugin is discoverable as a derivative producer by core's
- *     `/api/v1/media/{id}/derivatives` endpoint without any further
- *     wiring: the discovery registry picks up `TypstRenderProducer`
- *     on the plugin's first `register()` hook.
+ *   - **No dependency on `spora-plugin-media-archive`.** Inputs are
+ *     served via the plugin's own `/api/v1/typst/{fonts,templates,
+ *     examples,images}/*` routes; outputs go through core's
+ *     `MediaDerivativeService::create()` and surface via core's
+ *     `/api/v1/assets/<uuid>.<ext>`. No HTTP hop into Media
+ *     Archive routes.
+ *
+ *   - **Typst world is principal-scoped.** The factory sets
+ *     `template_dir` to `<storage>/typst/<principal>/` and
+ *     `font_dirs` to `[<plugin>/skills/typst/fonts/, <storage>/typst/
+ *     fonts/<principal>/]`. Skill-shipped templates live at the
+ *     parallel `<plugin>/skills/typst/{templates,examples}/` paths
+ *     and are surfaced in the admin UI as a separate listing; the
+ *     per-principal `template_dir` deliberately does NOT include
+ *     them, so the operator can shadow a skill-shipped file by
+ *     uploading one of the same name under their principal.
  */
 final class TypstPlugin extends AbstractPlugin
 {
@@ -65,13 +81,14 @@ final class TypstPlugin extends AbstractPlugin
     public function register(ContainerBuilder $builder): void
     {
         $builder->addDefinitions([
-            TypstFontController::class    => \DI\autowire(),
-            TypstExampleController::class => \DI\autowire(),
-            TypstImageController::class   => \DI\autowire(),
-            TypstCompileController::class => \DI\autowire(),
-            TypstRenderTool::class        => \DI\autowire(),
-            TypstInspectTool::class       => \DI\autowire(),
-            TypstResourcesTool::class     => \DI\autowire(),
+            TypstFontController::class      => \DI\autowire(),
+            TypstTemplateController::class   => \DI\autowire(),
+            TypstExampleController::class    => \DI\autowire(),
+            TypstImageController::class     => \DI\autowire(),
+            TypstCompileController::class   => \DI\autowire(),
+            TypstRenderTool::class          => \DI\autowire(),
+            TypstInspectTool::class         => \DI\autowire(),
+            TypstResourcesTool::class       => \DI\autowire(),
         ]);
 
         // Idempotent — `MediaDerivativeProducerDiscovery::add()` no-ops
@@ -80,7 +97,7 @@ final class TypstPlugin extends AbstractPlugin
     }
 
     /**
-     * Register the seven `/api/v1/typst/*` routes behind Auth + CSRF.
+     * Register the nine `/api/v1/typst/*` routes behind Auth + CSRF.
      * Mirrors the spora-plugin-memories auth chain verbatim so the
      * admin UI's fetch() calls Just Work.
      */
@@ -94,16 +111,23 @@ final class TypstPlugin extends AbstractPlugin
         $r->addRoute('POST', '/api/v1/typst/fonts', [TypstFontController::class, 'store'], $auth);
         $r->addRoute('DELETE', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'destroy'], $auth);
 
-        // Examples
+        // Templates (full document skeletons)
+        $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'show'], $auth);
+        $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], $auth);
+        $r->addRoute('DELETE', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'destroy'], $auth);
+
+        // Examples (small pattern snippets — separate kind, separate URL prefix)
         $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], $auth);
         $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], $auth);
         $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], $auth);
         $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], $auth);
 
-        // Images — the row's `id` (not basename) is the addressable key.
+        // Images — the basename (not a row id) is the addressable key.
         $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/images/{name}', [TypstImageController::class, 'show'], $auth);
         $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/images/{id}', [TypstImageController::class, 'destroy'], $auth);
+        $r->addRoute('DELETE', '/api/v1/typst/images/{name}', [TypstImageController::class, 'destroy'], $auth);
 
         // Playground — compile inline Typst source to PDF/PNG/SVG.
         $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], $auth);

@@ -13,15 +13,16 @@ use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Read/write/delete the principal's tier-2 resources (fonts and
- * examples) used by Typst renders. The plugin-shipped tier-1
- * resources (Inter OFL fonts) are visible to `list`/`read` but
+ * Read/write/delete the principal's tier-2 resources (fonts,
+ * templates, and examples) used by Typst renders. The
+ * plugin-shipped tier-1 resources (Inter OFL fonts, invoice
+ * template, headings example) are visible to `list`/`read` but
  * cannot be deleted.
  *
  * Multi-op dispatcher with a single shared parameter schema:
- *   - `action=resources_list`   — list fonts/examples the principal can see
- *   - `action=resources_write`  — upload a new font/example to tier 2
- *   - `action=resources_delete` — remove a tier-2 font/example
+ *   - `action=resources_list`   — list fonts/templates/examples the principal can see
+ *   - `action=resources_write`  — upload a new tier-2 resource
+ *   - `action=resources_delete` — remove a tier-2 resource
  *
  * The tool's storage contract mirrors {@see TypstResourceStore}:
  * basenames are restricted to a conservative charset (the tool
@@ -30,18 +31,24 @@ use Throwable;
  *
  * Returns machine-readable listings (action=list) or a confirmation
  * (action=write/delete). For upload/delete from the admin panel
- * use {@see \Spora\Plugins\Typst\Http\TypstFontController} and
+ * use {@see \Spora\Plugins\Typst\Http\TypstFontController},
+ * {@see \Spora\Plugins\Typst\Http\TypstTemplateController}, and
  * {@see \Spora\Plugins\Typst\Http\TypstExampleController} instead —
  * they enforce the same invariants over HTTP.
+ *
+ * `image` resources are managed through a different store
+ * ({@see \Spora\Plugins\Typst\Services\TypstImageStore}) and aren't
+ * reachable via this tool — upload them via the admin panel's
+ * Images tab or `POST /api/v1/typst/images`.
  */
 #[Tool(
     name: 'typst_resources',
-    description: 'Manage the Typst plugin\'s per-principal font and example resources (list / write / delete).',
+    description: 'Manage the Typst plugin\'s per-principal font, template, and example resources (list / write / delete).',
 )]
 #[ToolParameter(
     name: 'kind',
     type: 'string',
-    description: 'Resource kind: font | example.',
+    description: 'Resource kind: font | template | example.',
     required: true,
 )]
 #[ToolParameter(

@@ -4,44 +4,36 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Services;
 
-use Illuminate\Database\Capsule\Manager as Capsule;
-use Illuminate\Support\Carbon;
 use RuntimeException;
-use Spora\Models\MediaAsset;
-use Spora\Services\AssetReference;
-use Spora\Services\AssetStore;
-use Spora\Services\MediaArchive\MediaType;
-use Throwable;
 
 /**
- * Stores Typst-plugin image uploads as `media_assets` rows.
+ * Filesystem-backed image store for the Typst plugin.
  *
- * Distinct from {@see TypstResourceStore} (fonts + examples) in two ways:
+ * Stores uploaded images as plain files under
+ * `<storage>/typst/images/<principal>/<basename>`. Replaces the
+ * earlier media_assets-backed version (which made the Typst image
+ * library show up in the operator's media archive, cluttering it
+ * with input material that doesn't belong there).
  *
- *  1. **Storage location.** Fonts and examples live as raw files in
- *     plugin-private storage (`<storage>/typst/{fonts,examples}/<id>/`).
- *     Images live as proper `media_assets` rows so the asset_url can be
- *     fed back to ext-typst as `#image("…/api/v1/assets/<uuid>.<ext>")`
- *     and the row participates in the media library's LIST / Versions
- *     UI surface.
+ * The rendered Typst OUTPUTS (PDF/PNG/SVG) still land in the media
+ * archive as proper derivatives via `MediaDerivativeService::create()` —
+ * the split is: inputs (this store, filesystem) vs. outputs (media
+ * archive). Per the architecture decision in the PR that introduced
+ * this design.
  *
- *  2. **Id surface.** Fonts + examples use basenames (no row, no UUID);
- *     images use the canonical uuid-keyed `media_assets.id` so the
- *     cross-references in the chat UI's `MediaEmbed` markdown resolve.
- *
- * The store is a leaf with no DI dependencies beyond `AssetStore` — the
- * AssetStore decides between `data_url` and `local` storage based on
- * payload size, mirroring {@see \Spora\Services\MediaArchive\MediaArchiveIngestPipeline}'s
- * branching.
+ * Listing / serving / deleting all use the filesystem directly; no
+ * `media_assets` rows are touched. The image URL is constructed as
+ * `/api/v1/typst/images/<basename>` (served by {@see TypstImageController}
+ * via `show()`) so Typst's `#image("…")` calls hit the plugin's own
+ * route — keeping the URL surface stable across reinstalls and
+ * avoiding the media-archive URL prefix.
  */
 final class TypstImageStore
 {
     /**
-     * Maximum upload size (5 MiB). Bigger than the font/example cap
-     * (also 5 MiB) but kept consistent for plugin-wide simplicity.
-     * Operators with legitimate larger needs can bump this in a
-     * follow-up; we don't want a single chat-time upload to fill the
-     * storage volume before the admin notices.
+     * Maximum upload size (5 MiB). Same as the font/template cap for
+     * plugin-wide simplicity; a single chat-time upload shouldn't
+     * fill the storage volume before the admin notices.
      */
     public const MAX_BYTES = 5_242_880;
 
@@ -51,38 +43,96 @@ final class TypstImageStore
      * vector graphics (and Spora's chat UI sanitiser handles inline
      * SVG via the same `<img src>` path as raster).
      */
-    private const ALLOWED_MIMES = [
+    public const ALLOWED_MIMES = [
         'image/png',
         'image/jpeg',
         'image/webp',
         'image/svg+xml',
     ];
 
-    private const MIME_TO_EXT = [
+    public const MIME_TO_EXT = [
         'image/png'     => 'png',
         'image/jpeg'    => 'jpg',
         'image/webp'    => 'webp',
         'image/svg+xml' => 'svg',
     ];
 
+    public const EXT_TO_MIME = [
+        'png'  => 'image/png',
+        'jpg'  => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'webp' => 'image/webp',
+        'svg'  => 'image/svg+xml',
+    ];
+
+    /**
+     * Basename charset: conservative — `A-Z a-z 0-9 . _ -` only.
+     * Path separators and shell metas are rejected; the basename is
+     * concatenated into a path PHP's filesystem layer trusts
+     * unconditionally.
+     */
+    private const BASENAME_PATTERN = '/^[A-Za-z0-9._-]+$/';
+
     public function __construct(
-        private readonly AssetStore $assetStore,
+        private readonly TypstResourcePaths $paths,
     ) {}
 
     /**
-     * Persist a new image bytes payload and return the freshly
-     * minted {@see MediaAsset} row. Caller (the HTTP controller) is
-     * responsible for principal-scoped ownership checks before
-     * reaching this method.
-     *
-     * `principal_id` is optional here (nullable on the table, nullable
-     * in Spora's principal model — same shape {@see MediaDerivativeService::createNew()}
-     * follows). The HTTP layer is the gate that decides whether to
-     * pass a principal id; CLI / fixture callers may pass `null`.
-     *
-     * @param array<string, mixed> $ownership
+     * @return list<array{name: string, mime: string, size: int, modified_at: int}>
      */
-    public function create(string $bytes, string $mime, array $ownership): MediaAsset
+    public function list(): array
+    {
+        $dir = $this->paths->principalImageDirectory();
+        if (!is_dir($dir)) {
+            return [];
+        }
+        $entries = @scandir($dir);
+        if ($entries === false) {
+            return [];
+        }
+        $out = [];
+        foreach ($entries as $name) {
+            if ($name === '.' || $name === '..' || $name[0] === '.') {
+                continue;
+            }
+            $path = $dir . '/' . $name;
+            if (!is_file($path)) {
+                continue;
+            }
+            $stat = @stat($path);
+            $mime = $this->mimeFromName($name);
+            $out[] = [
+                'name'        => $name,
+                'mime'        => $mime ?? 'application/octet-stream',
+                'size'        => is_int($stat['size'] ?? null) ? $stat['size'] : 0,
+                'modified_at' => is_int($stat['mtime'] ?? null) ? $stat['mtime'] : 0,
+            ];
+        }
+        usort($out, static fn(array $a, array $b): int => strcasecmp($a['name'], $b['name']));
+        return $out;
+    }
+
+    /**
+     * Read raw bytes by basename. Returns null when not present.
+     */
+    public function read(string $basename): ?string
+    {
+        $this->validateBasename($basename);
+        $path = $this->paths->principalImageDirectory() . '/' . $basename;
+        if (!is_file($path)) {
+            return null;
+        }
+        $bytes = @file_get_contents($path);
+        return $bytes === false ? null : $bytes;
+    }
+
+    /**
+     * Persist a new image (or overwrite an existing one) and return
+     * metadata for the API response. The basename is derived from the
+     * supplied `$filename` (sanitised) or, when absent, generated
+     * from the MIME type and timestamp.
+     */
+    public function write(string $bytes, string $mime, ?string $filename = null): array
     {
         $mime = strtolower(trim($mime));
         if (!in_array($mime, self::ALLOWED_MIMES, true)) {
@@ -101,117 +151,59 @@ final class TypstImageStore
                 self::MAX_BYTES,
             ));
         }
-        $principalRaw = $ownership['principal_id'] ?? null;
-        $principal = is_int($principalRaw) || is_string($principalRaw) || is_numeric($principalRaw)
-            ? (int) $principalRaw
-            : null;
-        if ($principal !== null && $principal <= 0) {
-            throw new RuntimeException('TypstImageStore: principal_id must be a positive integer when supplied');
-        }
 
-        $now       = Carbon::now();
-        $assetId   = self::generateUuid();
-        $userId    = isset($ownership['user_id']) && is_numeric($ownership['user_id'])
-            ? (int) $ownership['user_id']
-            : null;
-        $rawName   = isset($ownership['filename']) && is_string($ownership['filename']) && $ownership['filename'] !== ''
-            ? $ownership['filename']
-            : null;
-        $filename  = $rawName ?? ('typst-image.' . self::MIME_TO_EXT[$mime]);
+        $basename = $this->resolveBasename($filename, $mime);
 
-        // AssetStore decides data_url vs local based on size; the
-        // returned AssetReference's `mode` + `token` populate the
-        // matching columns on the MediaAsset row below.
-        $reference = $this->assetStore->store($bytes, $mime, $filename);
-
-        $asset = new MediaAsset();
-        $asset->id            = $assetId;
-        $asset->principal_id  = $principal;
-        $asset->user_id       = $userId;
-        $asset->plugin_slug   = 'spora-plugin-typst';
-        $asset->tool_name     = 'typst.image';
-        $asset->mime_type     = $mime;
-        $asset->media_type    = MediaType::Image->value;
-        $asset->byte_size     = strlen($bytes);
-        $asset->filename      = $filename;
-        $asset->storage_mode  = $reference->mode;
-        $asset->asset_token   = $reference->token ?? bin2hex(random_bytes(16));
-        $asset->asset_url     = \Spora\Services\MediaArchive\MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $assetId . '.' . self::MIME_TO_EXT[$mime];
-        $asset->upload_source = 'plugin';
-        $asset->created_at    = $now;
-        $asset->updated_at    = $now;
-
-        try {
-            Capsule::connection()->transaction(function () use ($asset, $bytes, $reference): void {
-                $asset->save();
-                if ($reference->mode === 'data_url') {
-                    $asset->payload = $bytes;
-                    $asset->save();
-                }
-            });
-        } catch (Throwable $e) {
+        $dir = $this->paths->principalImageDirectory();
+        if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
             throw new RuntimeException(sprintf(
-                'TypstImageStore: failed to persist asset: %s',
-                $e->getMessage(),
-            ), 0, $e);
+                'TypstImageStore: could not create directory "%s"',
+                $dir,
+            ));
+        }
+        $path = $dir . '/' . $basename;
+        $written = @file_put_contents($path, $bytes);
+        if ($written === false || $written !== strlen($bytes)) {
+            throw new RuntimeException(sprintf(
+                'TypstImageStore: failed to write "%s"',
+                $path,
+            ));
         }
 
-        return $asset;
+        $stat = @stat($path);
+        return [
+            'name'        => $basename,
+            'mime'        => $mime,
+            'size'        => strlen($bytes),
+            'modified_at' => is_int($stat['mtime'] ?? null) ? $stat['mtime'] : 0,
+            'path'        => $path,
+        ];
     }
 
-    /**
-     * Soft-delete a media_asset by id. Throws when the row is missing
-     * OR not owned by `$principalId` — both are 404-equivalents from
-     * the controller's perspective (don't leak existence).
-     *
-     * Deleting the `media_assets` row cascades to the `payload`
-     * column on the same table; the local-mode `AssetStore` on disk
-     * file is cleaned up by a separate `MediaArchiveService::destroy()`
-     * path that we don't import here to keep this service leaf-y.
-     */
-    public function delete(string $id, int $principalId): void
+    public function delete(string $basename): void
     {
-        $asset = MediaAsset::query()->find($id);
-        if ($asset === null) {
+        $this->validateBasename($basename);
+        $path = $this->paths->principalImageDirectory() . '/' . $basename;
+        if (!is_file($path)) {
             throw new RuntimeException('TypstImageStore: image not found');
         }
-        if ((int) $asset->principal_id !== $principalId || $asset->plugin_slug !== 'spora-plugin-typst') {
-            throw new RuntimeException('TypstImageStore: image not found');
-        }
-        try {
-            $asset->delete();
-        } catch (Throwable $e) {
+        if (!@unlink($path)) {
             throw new RuntimeException(sprintf(
-                'TypstImageStore: failed to delete: %s',
-                $e->getMessage(),
-            ), 0, $e);
+                'TypstImageStore: failed to delete "%s"',
+                $path,
+            ));
         }
     }
 
     /**
-     * List images visible to a principal — owned by `$principalId`
-     * AND plugin_slug='spora-plugin-typst' AND tool_name='typst.image'.
-     * The plugin/tool-name filter keeps Media Archive uploads out of
-     * the Typst admin UI even when both plugins are installed.
-     *
-     * @return list<MediaAsset>
+     * Build the public URL the LLM (and the playground result panel)
+     * paste into `#image("…")`. The plugin's own controller serves
+     * these URLs — the chat's `MediaEmbed` markdown links to them as
+     * well so the same URL works in both contexts.
      */
-    public function listFor(int $principalId): array
+    public function publicUrl(string $basename): string
     {
-        $ids = MediaAsset::query()
-            ->where('principal_id', $principalId)
-            ->where('plugin_slug', 'spora-plugin-typst')
-            ->where('tool_name', 'typst.image')
-            ->orderBy('created_at', 'desc')
-            ->pluck('id');
-        $out = [];
-        foreach ($ids as $id) {
-            $asset = MediaAsset::query()->find((string) $id);
-            if ($asset instanceof MediaAsset) {
-                $out[] = $asset;
-            }
-        }
-        return $out;
+        return '/api/v1/typst/images/' . rawurlencode($basename);
     }
 
     public static function isAllowedMime(string $mime): bool
@@ -219,15 +211,38 @@ final class TypstImageStore
         return in_array(strtolower(trim($mime)), self::ALLOWED_MIMES, true);
     }
 
-    /**
-     * Generate a UUIDv4 — same canonical format as {@see MediaDerivativeService::generateUuid()}
-     * so cross-table lookups stay coherent.
-     */
-    private static function generateUuid(): string
+    private function mimeFromName(string $name): ?string
     {
-        $bytes = random_bytes(16);
-        $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
-        $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
-        return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        return self::EXT_TO_MIME[$ext] ?? null;
+    }
+
+    /**
+     * Sanitise the supplied filename down to the allowed charset,
+     * falling back to `<timestamp>.<ext>` when nothing usable came in.
+     */
+    private function resolveBasename(?string $filename, string $mime): string
+    {
+        $ext = self::MIME_TO_EXT[$mime] ?? 'bin';
+        if ($filename !== null && $filename !== '') {
+            $clean = basename(str_replace('\\', '/', $filename));
+            if ($clean !== '' && $clean !== '.' && $clean !== '..' && preg_match(self::BASENAME_PATTERN, $clean)) {
+                return $clean;
+            }
+        }
+        return sprintf('typst-image-%d.%s', time(), $ext);
+    }
+
+    private function validateBasename(string $basename): void
+    {
+        if ($basename === '' || $basename === '.' || $basename === '..') {
+            throw new RuntimeException('TypstImageStore: empty or reserved basename');
+        }
+        if (!preg_match(self::BASENAME_PATTERN, $basename)) {
+            throw new RuntimeException(sprintf(
+                'TypstImageStore: invalid basename "%s" (allowed: A-Z a-z 0-9 . _ -)',
+                $basename,
+            ));
+        }
     }
 }

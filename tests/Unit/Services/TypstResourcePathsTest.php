@@ -12,16 +12,31 @@ beforeEach(function () {
 
 it('exposes the skill directories under the plugin install root', function () {
     $skillFont = $this->resourcePaths->skillFontDirectory();
+    $skillTemplate = $this->resourcePaths->skillTemplateDirectory();
     $skillExample = $this->resourcePaths->skillExampleDirectory();
     expect($skillFont)->toEndWith('/skills/typst/fonts');
+    expect($skillTemplate)->toEndWith('/skills/typst/templates');
     expect($skillExample)->toEndWith('/skills/typst/examples');
 });
 
 it('exposes the principal directories under storage', function () {
     expect($this->resourcePaths->principalFontDirectory())
         ->toEndWith('/typst/fonts/42');
+    expect($this->resourcePaths->principalTemplateDirectory())
+        ->toEndWith('/typst/templates/42');
     expect($this->resourcePaths->principalExampleDirectory())
         ->toEndWith('/typst/examples/42');
+    expect($this->resourcePaths->principalImageDirectory())
+        ->toEndWith('/typst/images/42');
+});
+
+it('exposes a per-principal base directory that contains templates + examples subdirs', function () {
+    // `principalDirectory()` is the `template_dir` Typst sees; both
+    // `templates/` and `examples/` live under it as siblings so
+    // `#include "templates/foo.typ"` and `#include "examples/bar.typ"`
+    // both resolve naturally.
+    expect($this->resourcePaths->principalDirectory())
+        ->toEndWith('/typst/42');
 });
 
 it('returns skill-shipped resources even with no principal tier-2', function () {

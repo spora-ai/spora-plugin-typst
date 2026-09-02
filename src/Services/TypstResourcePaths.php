@@ -12,32 +12,46 @@ use Spora\Core\Paths;
 /**
  * Computes the on-disk locations of Typst plugin resources.
  *
- * Two tiers, mirroring the design locked in
- * `spora-workspace/plans/typst-plugin.md` § Storage layout:
+ * Three kinds, two tiers:
  *
- *  - **Tier 1 (skill, read-only).** Fonts and example templates shipped
- *    with the plugin's `skills/typst/` directory. These are versioned
- *    with the plugin and shared across every install: an operator can
- *    rely on Inter OFL being present without uploading anything. The
- *    path resolves through {@see InstalledVersions::getInstallPath()} so
- *    the plugin's own install root is the anchor, regardless of whether
- *    the operator installed from Packagist or a path repo.
+ *   | Kind      | Tier 1 (skill, read-only)        | Tier 2 (principal, writable)             |
+ *   |-----------|----------------------------------|------------------------------------------|
+ *   | `font`    | `<plugin>/skills/typst/fonts/`   | `<storage>/typst/fonts/<principal>/`    |
+ *   | `template`| `<plugin>/skills/typst/templates/`|`<storage>/typst/templates/<principal>/`  |
+ *   | `example` | `<plugin>/skills/typst/examples/`| `<storage>/typst/examples/<principal>/`   |
+ *   | `image`   | (none — examples are uploads)    | `<storage>/typst/images/<principal>/`     |
  *
- *  - **Tier 2 (principal, writable).** Uploads from the admin panel or
- *    a future `POST /api/v1/typst/fonts` endpoint. Stored under
- *    `<storage>/typst/{fonts,examples}/<principal-id>/`. This is the
- *    principal-scoped scratch space the operator can grow without
- *    touching the plugin's read-only tier-1 install.
+ * `template` and `example` look the same to Typst — both are
+ * `.typ` files referenced via `#include`. The distinction is purely
+ * navigational: `template` is for end-user document skeletons
+ * (invoice.typ, letter.typ), `example` is for pattern snippets the
+ * LLM reads to learn a primitive (headings.typ, table.typ).
  *
- * Reads consult tier 1 first, tier 2 second; writes only ever touch
- * tier 2. Listing returns the union (deduplicated by basename — tier 2
- * shadows tier 1 on basename collision, mirroring a typical CSS
- * cascade).
+ * Tier 1 (skill-shipped) is the canonical, versioned set that ships
+ * with the plugin. Tier 2 (per-principal) is operator-uploaded and
+ * shadows tier 1 on basename collision, mirroring the cascade the
+ * earlier font + example design locked in. The listing API merges
+ * both tiers.
+ *
+ * The plugin's TypstWorldFactory uses these paths to set
+ * `template_dir` (per-principal so `#include "templates/foo.typ"` and
+ * `#include "examples/bar.typ"` both resolve under it) and
+ * `font_dirs` (an array of tier-1 + tier-2 paths Typst searches
+ * recursively). See {@see TypstWorldFactory} for the world config.
  */
 final class TypstResourcePaths
 {
     public const KIND_FONT = 'font';
+    public const KIND_TEMPLATE = 'template';
     public const KIND_EXAMPLE = 'example';
+    public const KIND_IMAGE = 'image';
+
+    /** All kinds the API surface exposes for listing + upload. */
+    public const KINDS = [
+        self::KIND_FONT,
+        self::KIND_TEMPLATE,
+        self::KIND_EXAMPLE,
+    ];
 
     private const PLUGIN_PACKAGE = 'spora-ai/spora-plugin-typst';
 
@@ -51,9 +65,10 @@ final class TypstResourcePaths
     ) {}
 
     /**
-     * Directory holding the plugin-shipped (tier-1) font + example files.
-     * Always inside the plugin's `skills/typst/` directory so it travels
-     * with the plugin package — no symlinks, no bootstrap-time copy.
+     * Directory holding the plugin-shipped (tier-1) resources.
+     * Always inside the plugin's `skills/typst/` directory so they
+     * travel with the plugin package — no symlinks, no bootstrap-time
+     * copy.
      */
     public function skillDirectory(): string
     {
@@ -65,17 +80,45 @@ final class TypstResourcePaths
         return $this->skillDirectory() . '/fonts';
     }
 
+    public function skillTemplateDirectory(): string
+    {
+        return $this->skillDirectory() . '/templates';
+    }
+
     public function skillExampleDirectory(): string
     {
         return $this->skillDirectory() . '/examples';
     }
 
+    public function principalDirectory(): string
+    {
+        // Per-principal "base" directory. Typst's `template_dir` is
+        // set to this so its `templates/` and `examples/` subdirs are
+        // both visible under `#include "templates/foo"` /
+        // `#include "examples/bar"`.
+        if ($this->principalId === null) {
+            throw new RuntimeException('TypstResourcePaths::principalDirectory() called without a principal scope');
+        }
+        return $this->paths->storage('typst') . '/' . $this->principalId;
+    }
+
     public function principalFontDirectory(): string
     {
+        // Kind-first: `<storage>/typst/fonts/<principal>/` — matches
+        // the skill-shipped tier-1 path layout (which is also
+        // kind-first: `<plugin>/skills/typst/fonts/`).
         if ($this->principalId === null) {
             throw new RuntimeException('TypstResourcePaths::principalFontDirectory() called without a principal scope');
         }
         return $this->paths->storage('typst/fonts') . '/' . $this->principalId;
+    }
+
+    public function principalTemplateDirectory(): string
+    {
+        if ($this->principalId === null) {
+            throw new RuntimeException('TypstResourcePaths::principalTemplateDirectory() called without a principal scope');
+        }
+        return $this->paths->storage('typst/templates') . '/' . $this->principalId;
     }
 
     public function principalExampleDirectory(): string
@@ -84,6 +127,14 @@ final class TypstResourcePaths
             throw new RuntimeException('TypstResourcePaths::principalExampleDirectory() called without a principal scope');
         }
         return $this->paths->storage('typst/examples') . '/' . $this->principalId;
+    }
+
+    public function principalImageDirectory(): string
+    {
+        if ($this->principalId === null) {
+            throw new RuntimeException('TypstResourcePaths::principalImageDirectory() called without a principal scope');
+        }
+        return $this->paths->storage('typst/images') . '/' . $this->principalId;
     }
 
     /**
@@ -135,9 +186,10 @@ final class TypstResourcePaths
     public static function kindLabel(string $kind): string
     {
         return match ($kind) {
-            self::KIND_FONT    => 'Fonts',
-            self::KIND_EXAMPLE => 'Examples',
-            default            => throw new RuntimeException(sprintf(
+            self::KIND_FONT     => 'Fonts',
+            self::KIND_TEMPLATE => 'Templates',
+            self::KIND_EXAMPLE  => 'Examples',
+            default             => throw new RuntimeException(sprintf(
                 'TypstResourcePaths: unknown kind "%s"',
                 $kind,
             )),
@@ -146,12 +198,11 @@ final class TypstResourcePaths
 
     public static function assertValidKind(string $kind): void
     {
-        if ($kind !== self::KIND_FONT && $kind !== self::KIND_EXAMPLE) {
+        if (!in_array($kind, self::KINDS, true)) {
             throw new RuntimeException(sprintf(
-                'TypstResourcePaths: invalid kind "%s" (must be "%s" or "%s")',
+                'TypstResourcePaths: invalid kind "%s" (must be one of: %s)',
                 $kind,
-                self::KIND_FONT,
-                self::KIND_EXAMPLE,
+                implode(', ', self::KINDS),
             ));
         }
     }
@@ -182,16 +233,31 @@ final class TypstResourcePaths
     private function directoryFor(string $kind, bool $tierOne): string
     {
         self::assertValidKind($kind);
+        // assertValidKind narrows $kind to one of KINDS; the `default`
+        // arm is dead code that PHPStan needs to keep match()
+        // exhaustive, but it never executes.
         if ($tierOne) {
-            return $kind === self::KIND_FONT
-                ? $this->skillFontDirectory()
-                : $this->skillExampleDirectory();
+            return match ($kind) {
+                self::KIND_FONT     => $this->skillFontDirectory(),
+                self::KIND_TEMPLATE => $this->skillTemplateDirectory(),
+                self::KIND_EXAMPLE  => $this->skillExampleDirectory(),
+                default             => throw new RuntimeException(sprintf(
+                    'TypstResourcePaths: unhandled kind "%s" (assertValidKind should have rejected this)',
+                    $kind,
+                )),
+            };
         }
         // Tier-2 paths need a principal scope; the world factory
         // (no principal) never calls into tier-2.
-        return $kind === self::KIND_FONT
-            ? $this->principalFontDirectory()
-            : $this->principalExampleDirectory();
+        return match ($kind) {
+            self::KIND_FONT     => $this->principalFontDirectory(),
+            self::KIND_TEMPLATE => $this->principalTemplateDirectory(),
+            self::KIND_EXAMPLE  => $this->principalExampleDirectory(),
+            default             => throw new RuntimeException(sprintf(
+                'TypstResourcePaths: unhandled kind "%s" (assertValidKind should have rejected this)',
+                $kind,
+            )),
+        };
     }
 
     /**

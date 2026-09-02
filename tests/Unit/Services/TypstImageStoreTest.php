@@ -2,117 +2,116 @@
 
 declare(strict_types=1);
 
-use Illuminate\Database\Capsule\Manager as Capsule;
+use Spora\Core\Paths;
 use Spora\Plugins\Typst\Services\TypstImageStore;
-use Spora\Services\DataUrlAssetStore;
+use Spora\Plugins\Typst\Services\TypstResourcePaths;
 
 beforeEach(function () {
-    $this->store = new TypstImageStore(new DataUrlAssetStore());
+    $this->tempDir = sys_get_temp_dir() . '/typst-image-test-' . bin2hex(random_bytes(4));
+    mkdir($this->tempDir, 0o755, true);
+    mkdir($this->tempDir . '/storage', 0o755, true);
 
-    // Create two synthetic principals — `user_id`/`group_id` are both
-    // nullable so a "synthetic" row satisfies the FKs cleanly. Only
-    // one row can have null user_id (unique index), so we line up
-    // ids 1 and 2 with explicit user_ids here.
-    Capsule::table('principals')->insert([
-        ['id' => 1, 'type' => 'user', 'user_id' => null, 'group_id' => null, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
-        ['id' => 2, 'type' => 'user', 'user_id' => null, 'group_id' => null, 'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s')],
-    ]);
+    $this->paths = new Paths($this->tempDir);
+    $resourcePaths = new TypstResourcePaths($this->paths, principalId: 7);
+    $this->store = new TypstImageStore($resourcePaths);
 });
 
-it('persists a PNG image as a media_assets row with the right plugin attribution', function () {
+afterEach(function () {
+    if (is_dir($this->tempDir)) {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($this->tempDir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($iterator as $file) {
+            $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+        }
+        @rmdir($this->tempDir);
+    }
+});
+
+it('persists a PNG image under <storage>/typst/images/<principal>/', function () {
     $png = base64_decode(
         'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
     );
     expect($png)->not->toBeFalse();
 
-    $asset = $this->store->create($png, 'image/png', [
-        'principal_id' => 1,
-        'user_id'      => null,
-        'filename'     => 'logo.png',
-    ]);
-
-    expect($asset->plugin_slug)->toBe('spora-plugin-typst');
-    expect($asset->tool_name)->toBe('typst.image');
-    expect($asset->mime_type)->toBe('image/png');
-    expect($asset->media_type)->toBe('image');
-    expect($asset->filename)->toBe('logo.png');
-    expect($asset->principal_id)->toBe(1);
-    expect($asset->byte_size)->toBe(strlen($png));
-    expect($asset->asset_url)->toContain($asset->id);
-    expect($asset->asset_url)->toEndWith('.png');
-    expect($asset->publicUrl())->toEndWith('.png');
+    $row = $this->store->write($png, 'image/png', 'logo.png');
+    expect($row['name'])->toBe('logo.png');
+    expect($row['mime'])->toBe('image/png');
+    expect($row['size'])->toBe(strlen($png));
+    expect(is_file($this->tempDir . '/storage/typst/images/7/logo.png'))->toBeTrue();
 });
 
 it('mints a sensible default filename when none is supplied', function () {
     $png = "\x89PNG\r\n\x1a\n" . random_bytes(50);
-    $asset = $this->store->create($png, 'image/png', ['principal_id' => 1]);
+    $row = $this->store->write($png, 'image/png', null);
 
-    expect($asset->filename)->toBe('typst-image.png');
+    expect($row['name'])->toStartWith('typst-image-');
+    expect($row['name'])->toEndWith('.png');
 });
 
-it('stores SVG as image/svg+xml with the svg extension', function () {
+it('stores SVG with image/svg+xml', function () {
     $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect/></svg>';
-    $asset = $this->store->create($svg, 'image/svg+xml', ['principal_id' => 1]);
+    $row = $this->store->write($svg, 'image/svg+xml', 'icon.svg');
 
-    expect($asset->mime_type)->toBe('image/svg+xml');
-    expect($asset->asset_url)->toEndWith('.svg');
+    expect($row['name'])->toBe('icon.svg');
+    expect($row['mime'])->toBe('image/svg+xml');
+    expect($row['size'])->toBe(strlen($svg));
 });
 
 it('rejects an unsupported mime', function () {
-    expect(fn() => $this->store->create('x', 'image/gif', ['principal_id' => 1]))
+    expect(fn() => $this->store->write('x', 'image/gif', 'logo.gif'))
         ->toThrow(RuntimeException::class, 'not allowed');
 });
 
 it('rejects an empty payload', function () {
-    expect(fn() => $this->store->create('', 'image/png', ['principal_id' => 1]))
+    expect(fn() => $this->store->write('', 'image/png', 'logo.png'))
         ->toThrow(RuntimeException::class, 'empty payload');
 });
 
 it('rejects an oversize payload', function () {
     $big = str_repeat('a', TypstImageStore::MAX_BYTES + 1);
-    expect(fn() => $this->store->create($big, 'image/png', ['principal_id' => 1]))
+    expect(fn() => $this->store->write($big, 'image/png', 'big.png'))
         ->toThrow(RuntimeException::class, 'exceeds');
 });
 
-it('rejects a zero principal_id', function () {
-    expect(fn() => $this->store->create('x', 'image/png', ['principal_id' => 0]))
-        ->toThrow(RuntimeException::class, 'positive integer');
-});
-
 it('isolates lists by principal_id', function () {
-    $a = $this->store->create('x', 'image/png', ['principal_id' => 1, 'filename' => 'a.png']);
-    $b = $this->store->create('x', 'image/png', ['principal_id' => 1, 'filename' => 'b.png']);
-    // Different principal — must not show up.
-    $this->store->create('x', 'image/png', ['principal_id' => 2, 'filename' => 'other.png']);
+    // Write a file under principal 7 directly so we don't depend on
+    // the public write() method's principal-resolution flow.
+    $dir7 = $this->tempDir . '/storage/typst/images/7';
+    $dir8 = $this->tempDir . '/storage/typst/images/8';
+    mkdir($dir7, 0o755, true);
+    mkdir($dir8, 0o755, true);
+    file_put_contents($dir7 . '/a.png', 'x');
+    file_put_contents($dir7 . '/b.png', 'x');
+    file_put_contents($dir8 . '/other.png', 'x');
 
-    $rows = $this->store->listFor(1);
-    expect($rows)->toHaveCount(2);
-    $ids = array_map(static fn(Spora\Models\MediaAsset $row): string => $row->id, $rows);
-    expect($ids)->toContain($a->id);
-    expect($ids)->toContain($b->id);
-
-    foreach ($rows as $row) {
-        expect($row->principal_id)->toBe(1);
-        expect($row->plugin_slug)->toBe('spora-plugin-typst');
-        expect($row->tool_name)->toBe('typst.image');
-    }
+    $names = array_map(static fn(array $row): string => $row['name'], $this->store->list());
+    expect($names)->toContain('a.png');
+    expect($names)->toContain('b.png');
+    expect($names)->not->toContain('other.png');
 });
 
-it('deletes an image by id', function () {
-    $asset = $this->store->create('x', 'image/png', ['principal_id' => 1]);
-    $this->store->delete($asset->id, 1);
+it('deletes an image by basename', function () {
+    $this->store->write('x', 'image/png', 'doomed.png');
+    $this->store->delete('doomed.png');
 
-    expect(Spora\Models\MediaAsset::query()->find($asset->id))->toBeNull();
+    expect(is_file($this->tempDir . '/storage/typst/images/7/doomed.png'))->toBeFalse();
 });
 
 it('refuses to delete a missing image', function () {
-    expect(fn() => $this->store->delete('nonexistent-id', 1))
+    expect(fn() => $this->store->delete('nonexistent.png'))
         ->toThrow(RuntimeException::class, 'not found');
 });
 
-it('refuses to delete another principal\'s image', function () {
-    $asset = $this->store->create('x', 'image/png', ['principal_id' => 1]);
-    expect(fn() => $this->store->delete($asset->id, 2))
-        ->toThrow(RuntimeException::class, 'not found');
-    expect(Spora\Models\MediaAsset::query()->find($asset->id))->not->toBeNull();
+it('rejects path-traversal basenames on read', function () {
+    expect(fn() => $this->store->read('../etc/passwd'))
+        ->toThrow(RuntimeException::class, 'invalid basename');
+});
+
+it('publicUrl is /api/v1/typst/images/{basename}', function () {
+    expect($this->store->publicUrl('logo.png'))
+        ->toBe('/api/v1/typst/images/logo.png');
+    expect($this->store->publicUrl('a b.png'))
+        ->toBe('/api/v1/typst/images/a%20b.png');
 });

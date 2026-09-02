@@ -141,41 +141,64 @@ Common pitfalls:
 
 ## Resources
 
-Two tiers:
+Three resource kinds, two tiers each:
 
-- **Skill-shipped (read-only)** — the plugin ships Inter OFL + the example templates you can browse with `typst_resources(action="resources_list")`. You cannot delete these.
-- **Principal-tier (writable)** — uploads via the admin panel or `typst_resources(action="resources_write")`. Tier-2 wins on basename collision.
+| Kind        | Purpose                                                 | Tier 1 (skill-shipped, read-only)             | Tier 2 (principal, writable)                  |
+|-------------|---------------------------------------------------------|----------------------------------------------|------------------------------------------------|
+| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter OFL)   | `<storage>/typst/fonts/<principal>/`           |
+| `template`  | Full document skeletons (e.g. invoice, letter)           | `<plugin>/skills/typst/templates/` (invoice) | `<storage>/typst/templates/<principal>/`       |
+| `example`   | Pattern snippets the LLM cribs from (headings, tables…) | `<plugin>/skills/typst/examples/` (headings)  | `<storage>/typst/examples/<principal>/`        |
+| `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/images/<principal>/`         |
 
-The default typst world merges both directories into `font_dirs` so a tier-2 font with the same basename as a skill-shipped font overrides it for that principal.
+Resources are listed with `typst_resources(action="resources_list", kind="<kind>")`.
+Uploads use `typst_resources(action="resources_write", kind="<kind>", name="...", content="...")`.
+Tier-2 wins on basename collision — uploading a font named `Inter-Regular.otf`
+overrides the skill-shipped one for that principal only.
+
+The plugin's Typst world is built per principal with:
+
+- `template_dir: <storage>/typst/<principal>/` — so both `templates/`
+  and `examples/` are visible as siblings. Include with
+  `#include "templates/invoice.typ"` or `#include "examples/headings.typ"`.
+  Skill-shipped templates and examples are NOT auto-injected into
+  the principal's `template_dir`; the operator lists them via
+  `typst_resources` and pastes the basename explicitly when they
+  want to use one.
+
+- `font_dirs: [<plugin>/skills/typst/fonts/, <storage>/typst/fonts/<principal>/]`
+  — Typst searches both. Reference by basename (`font: "Inter-Regular"`)
+  with no URL.
 
 ## Referencing assets
 
-The `typst_render` tool returns an `asset_url` field shaped like
-`/api/v1/assets/<uuid>.<ext>`. This is the same canonical URL the
-media archive uses for any `media_assets` row, so it round-trips
-into `MediaEmbed` markdown, the chat composer, and `typst_render`'s
-own subsequent calls.
+The plugin's image library returns URLs shaped like
+`/api/v1/typst/images/<basename>`. To embed an image in your
+Typst source, drop the URL straight into `#image()`:
 
-To include an image in your Typst source, drop the URL straight
-into `#image()`:
+```typst
+#image("/api/v1/typst/images/logo.png", width: 80%)
+```
+
+Upload images via `POST /api/v1/typst/images` (or the Images tab on
+the admin panel). The URL is returned in the upload response — paste
+it into your `typst_render` source.
+
+For images already in the operator's media archive (uploaded by
+other plugins or agents), use the media archive's canonical URL
+`/api/v1/assets/<uuid>.<ext>`:
 
 ```typst
 #image("/api/v1/assets/01HXYZ....png", width: 80%)
 ```
 
-Upload images via `POST /api/v1/typst/images` (or the Images tab
-on the admin panel). The asset_url is returned in the upload
-response — paste it into your `typst_render` source.
+The renderer's `MediaEmbed` markdown uses this same URL surface,
+so operator-pasted playground outputs and agent-generated renders
+share one URL convention.
 
-Font references work the same way: the plugin's `font_dirs`
-include skill-shipped OFL fonts (Inter Regular + Bold) plus any
-principal-tier fonts uploaded via `POST /api/v1/typst/fonts`. Just
-reference them by basename in Typst source (`font: "Inter-Regular"`)
+Font references use the same path: the plugin's `font_dirs` includes
+both skill-shipped OFL fonts (Inter Regular + Bold) and principal-tier
+uploads, so just reference them by basename (`font: "Inter-Regular"`)
 — no URL needed.
-
-The playground's "Copy as `#image()`" button builds the same
-snippet the LLM would, so operator-pasted playground outputs and
-agent-generated renders share one URL convention.
 
 ## Examples
 
@@ -213,8 +236,14 @@ typst_render(file: "01HXYZ_TYPSOURCE_UUID", format: "svg", page: 2)
 
 - 5 MB max upload per `typst_resources(action="resources_write")` call.
 - Basenames restricted to `A-Z a-z 0-9 . _ -`; `/`, `\`, `..` rejected.
-- Tier-2 fonts and examples are principal-scoped — you only see yours; you only delete yours.
-- `typst_render` always persists the derivative; there's no "preview without saving" mode. Use `typst_inspect` when you don't want a media-derivative row.
+- Tier-2 resources (fonts, templates, examples, images) are
+  principal-scoped — you only see yours; you only delete yours.
+  The renderer's `template_dir` is per-principal too, so a
+  `#include` won't accidentally reach into another principal's
+  templates.
+- `typst_render` always persists the derivative; there's no "preview
+  without saving" mode. Use `typst_inspect` when you don't want a
+  media-derivative row.
 
 ## When NOT to use Typst
 

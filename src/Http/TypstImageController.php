@@ -6,29 +6,30 @@ namespace Spora\Plugins\Typst\Http;
 
 use RuntimeException;
 use Spora\Auth\AuthService;
+use Spora\Core\Paths;
 use Spora\Http\JsonControllerHelpers;
-use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Services\TypstImageStore;
+use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * CRUD on the principal's per-tenant image library.
+ * CRUD on the principal's filesystem image library.
  *
- * Mirror of {@see TypstFontController}, but each row is a real
- * `media_assets` row (so the asset_url is canonical — feed it to
- * ext-typst's `#image()` and the rendered PDF/PNG pulls the bytes via
- * core's `AssetController`).
+ * Replaces the earlier media_assets-backed image store. The plugin's
+ * image uploads now live as plain files at
+ * `<storage>/typst/images/<principal>/<basename>`, served by
+ * {@see show()} at `/api/v1/typst/images/{basename}` so the
+ * `#image("…")` syntax in Typst source resolves to a stable URL
+ * (independent of any media-archive row's UUID).
  *
- * Why this is here and not in the Media Archive plugin: image uploads
- * for Typst renders are an operator concern, but the upload target is
- * the principal's *Typst* library, not the principal's media library.
- * Tagging the rows with `plugin_slug='spora-plugin-typst'` +
- * `tool_name='typst.image'` keeps them out of the Media Archive
- * library's LIST (which doesn't filter on plugin_slug today, but
- * future filter UIs will), so the two surfaces stay separable.
+ * Operators are expected to upload images via the dedicated `Images`
+ * tab in the admin UI. The Playground result panel shows the rendered
+ * PDF/PNG/SVG (a media derivative, not an image-library entry) and
+ * pastes its `/api/v1/assets/<uuid>.<ext>` URL into the source when
+ * the user clicks "Copy URL".
  */
 final class TypstImageController
 {
@@ -37,17 +38,11 @@ final class TypstImageController
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
-        private readonly TypstImageStore $store,
+        private readonly Paths $paths,
     ) {}
 
     /**
      * GET /api/v1/typst/images
-     *
-     * Optional `?principal_id=N` lets the caller scope the listing
-     * to any principal they can see (their own user-principal + the
-     * group-principals they're a member of). Omitting the param
-     * preserves the caller's own-principal default for backward
-     * compatibility with the v1 clients.
      */
     public function index(Request $request): JsonResponse
     {
@@ -60,18 +55,18 @@ final class TypstImageController
         } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
-        $rows = $this->store->listFor($principalId);
+        $rows = $this->storeForPrincipal($principalId)->list();
+        $buildUrl = fn(string $name): string => $this->publicUrlFor($principalId, $name);
 
         return new JsonResponse([
             'data' => [
                 'images' => array_map(
-                    static fn(MediaAsset $asset): array => [
-                        'id'         => $asset->id,
-                        'filename'   => $asset->filename,
-                        'mime_type'  => $asset->mime_type,
-                        'byte_size'  => $asset->byte_size,
-                        'asset_url'  => $asset->publicUrl(),
-                        'created_at' => $asset->created_at?->toIso8601String(),
+                    static fn(array $row): array => [
+                        'name'        => $row['name'],
+                        'mime'        => $row['mime'],
+                        'size'        => $row['size'],
+                        'modified_at' => $row['modified_at'],
+                        'url'         => $buildUrl($row['name']),
                     ],
                     $rows,
                 ),
@@ -80,15 +75,38 @@ final class TypstImageController
     }
 
     /**
+     * GET /api/v1/typst/images/{name}
+     *
+     * Streams the raw image bytes with the right Content-Type so the
+     * browser and the chat UI's `<img src>` can both consume it
+     * directly. `<iframe>`-able MIMEs are also returned with
+     * `inline` Content-Disposition to keep preview thumbnails tidy.
+     */
+    public function show(Request $request): Response
+    {
+        $store = $this->storeForCurrentUser();
+        $name = (string) $request->attributes->get('name', '');
+        $bytes = $store->read($name);
+        if ($bytes === null) {
+            return $this->notFound('NOT_FOUND', sprintf('Image "%s" not found', $name));
+        }
+        $mime = $this->mimeFromName($name);
+        return new Response($bytes, Response::HTTP_OK, [
+            'Content-Type'        => $mime,
+            'Content-Length'      => (string) strlen($bytes),
+            'Content-Disposition' => sprintf('inline; filename="%s"', addslashes($name)),
+            'Cache-Control'       => 'private, max-age=300',
+        ]);
+    }
+
+    /**
      * POST /api/v1/typst/images
+     * body: { "filename": "logo.png", "mime": "image/png", "content": "<base64 OR raw UTF-8 SVG>" }
      *
-     * body: { "filename": "logo.png", "mime": "image/png", "content": "<base64 OR raw bytes>" }
-     *
-     * The `content` field accepts either base64-encoded bytes or a raw
-     * UTF-8 string (handy for SVG, which is XML). Detection mirrors
-     * {@see TypstFontController::decodeContent()}: valid base64 of
-     * sufficient length wins; otherwise the string is treated as
-     * raw bytes verbatim.
+     * `content` accepts base64 (binary uploads) or raw UTF-8 (SVG).
+     * Detection matches the earlier controller's heuristic — valid
+     * base64 of sufficient length wins; otherwise the string is
+     * treated as raw bytes verbatim.
      */
     public function store(Request $request): JsonResponse
     {
@@ -98,7 +116,7 @@ final class TypstImageController
         }
         $mime    = strtolower(trim((string) ($body['mime'] ?? '')));
         $content = $body['content'] ?? null;
-        $name    = trim((string) ($body['filename'] ?? ''));
+        $name    = $body['filename'] ?? null;
 
         if (!TypstImageStore::isAllowedMime($mime)) {
             return $this->unprocessable('UNSUPPORTED_MIME', sprintf(
@@ -111,46 +129,54 @@ final class TypstImageController
         }
 
         $bytes = $this->decodeContent($content);
-        $userId = $this->auth->currentUserId();
-        $principalId = $this->principalIdForCurrentUser();
-
         try {
-            $asset = $this->store->create($bytes, $mime, [
-                'principal_id' => $principalId,
-                'user_id'      => $userId,
-                'filename'     => $name !== '' ? $this->sanitizeFilename($name, $mime) : null,
-            ]);
+            $row = $this->storeForCurrentUser()->write($bytes, $mime, is_string($name) ? $name : null);
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
         }
 
+        $principalId = $this->principalIdForCurrentUser();
         return new JsonResponse([
             'data' => [
                 'image' => [
-                    'id'         => $asset->id,
-                    'filename'   => $asset->filename,
-                    'mime_type'  => $asset->mime_type,
-                    'byte_size'  => $asset->byte_size,
-                    'asset_url'  => $asset->publicUrl(),
-                    'created_at' => $asset->created_at?->toIso8601String(),
+                    'name'        => $row['name'],
+                    'mime'        => $row['mime'],
+                    'size'        => $row['size'],
+                    'modified_at' => $row['modified_at'],
+                    'url'         => $this->publicUrlFor($principalId, $row['name']),
                 ],
             ],
         ], Response::HTTP_CREATED);
     }
 
     /**
-     * DELETE /api/v1/typst/images/{id}
+     * DELETE /api/v1/typst/images/{name}
      */
     public function destroy(Request $request): JsonResponse
     {
-        $id = (string) $request->attributes->get('id', '');
-        $principalId = $this->principalIdForCurrentUser();
+        $store = $this->storeForCurrentUser();
+        $name = (string) $request->attributes->get('name', '');
         try {
-            $this->store->delete($id, $principalId);
+            $store->delete($name);
         } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
+    }
+
+    private function storeForCurrentUser(): TypstImageStore
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null || $userId <= 0) {
+            throw new RuntimeException('Authentication required');
+        }
+        return $this->storeForPrincipal($this->principalIdForCurrentUser());
+    }
+
+    private function storeForPrincipal(int $principalId): TypstImageStore
+    {
+        $paths = new TypstResourcePaths($this->paths, $principalId);
+        return new TypstImageStore($paths);
     }
 
     private function principalIdForCurrentUser(): int
@@ -162,11 +188,6 @@ final class TypstImageController
         return $this->principals->ensureUserPrincipal($userId)->id;
     }
 
-    /**
-     * Resolve the principal id from `?principal_id=N`, falling back to
-     * the caller's own user-principal. Validates the requested id is
-     * in `visiblePrincipalIds` for the caller — throws 404 if not.
-     */
     private function resolvePrincipalId(Request $request, int $userId): int
     {
         $requested = $request->query->get('principal_id');
@@ -180,11 +201,21 @@ final class TypstImageController
         return $requestedId;
     }
 
+    private function publicUrlFor(int $principalId, string $name): string
+    {
+        return '/api/v1/typst/images/' . rawurlencode($name);
+    }
+
+    private function mimeFromName(string $name): string
+    {
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        return TypstImageStore::EXT_TO_MIME[$ext] ?? 'application/octet-stream';
+    }
+
     /**
-     * Auto-detect base64 vs raw-text content. Same heuristic as the
-     * font controller — kept inline here because the two controllers
-     * have slightly different validation rules and a shared helper
-     * would have to take 5+ parameters to be worth it.
+     * Auto-detect base64 vs raw-text content. Valid base64 of
+     * sufficient length wins; otherwise the string is treated as
+     * raw bytes verbatim (handy for SVG, which is XML).
      */
     private function decodeContent(string $content): string
     {
@@ -200,31 +231,5 @@ final class TypstImageController
             }
         }
         return $content;
-    }
-
-    /**
-     * Strip path-segments / shell metas from the user-supplied filename
-     * before persisting it. The asset's stored filename is shown back
-     * in the listing UI and embedded in the asset_url slug, so a
-     * basename containing `/` would be a small but real surface area.
-     */
-    private function sanitizeFilename(string $name, string $mime): string
-    {
-        $base = basename(str_replace('\\', '/', $name));
-        if ($base === '' || $base === '.' || $base === '..') {
-            // basename() may return '.' on edge inputs — fall back to a
-            // sensible default per mime.
-            return 'typst-image.' . match ($mime) {
-                'image/png'     => 'png',
-                'image/jpeg'    => 'jpg',
-                'image/webp'    => 'webp',
-                'image/svg+xml' => 'svg',
-                default         => 'bin',
-            };
-        }
-        // Drop anything outside [A-Z a-z 0-9 . _ -] — keeps the asset
-        // url slug web-safe and prevents the chat UI from breaking on
-        // filenames with spaces / unicode.
-        return preg_replace('/[^A-Za-z0-9._-]+/', '_', $base);
     }
 }
