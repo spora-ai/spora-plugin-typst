@@ -190,11 +190,13 @@ jobs:
         working-directory: /tmp/skeleton
         run: |
           # The composer installer (spora-ai/installer, type:spora-plugin)
-          # should have routed the plugin into plugins/<slug>/. A clean
-          # `spora:install` run above is sufficient evidence the manifest
-          # parses, the entry-point class autoloads, and PluginLoader
-          # can boot it — anything less fatal-errors during install.
-          test -d plugins/typst || (echo "Plugin NOT routed to plugins/typst/" && exit 1)
-          test -f plugins/typst/plugin.json || (echo "plugin.json missing" && exit 1)
-          test -f plugins/typst/composer.json || (echo "composer.json missing" && exit 1)
-          echo "Plugin routed to plugins/typst/ and manifest is in place."
+          # routes packages into plugins/<package-short-name>/ — i.e.
+          # `spora-plugin-typst`, NOT `typst`. The package short name is
+          # what PluginLoader scans, and `spora:install` having run
+          # without fatal errors above is sufficient evidence the
+          # manifest parsed, the entry-point class autoloaded, and
+          # PluginLoader booted the plugin.
+          test -d plugins/spora-plugin-typst || (echo "Plugin NOT routed to plugins/spora-plugin-typst/" && exit 1)
+          test -f plugins/spora-plugin-typst/plugin.json || (echo "plugin.json missing" && exit 1)
+          test -f plugins/spora-plugin-typst/composer.json || (echo "composer.json missing" && exit 1)
+          echo "Plugin routed to plugins/spora-plugin-typst/ and manifest is in place."
