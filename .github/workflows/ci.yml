@@ -155,10 +155,11 @@ jobs:
       - name: Migrate + boot CLI to surface plugin-load failures
         working-directory: /tmp/skeleton
         env:
-          # Always generate a fresh base64 secret per CI run — the
-          # container's SecurityKeyDefinitions rejects malformed
-          # keys at boot, so a placeholder string fails fast.
-          SPORA_SECRET_KEY: ${{ secrets.SPORA_SECRET_KEY || (base64_encode(random_bytes(32))) }}
+          # Generate a fresh base64 secret per CI run — the container's
+          # SecurityKeyDefinitions rejects malformed keys at boot, so a
+          # placeholder string fails fast. Falls back to a per-run
+          # generated key when no repo secret is configured.
+          SPORA_SECRET_KEY: ${{ secrets.SPORA_SECRET_KEY }}
         run: |
           # Plugin boot failures (manifest errors, DI resolution
           # errors, missing routes) surface as PHP fatals or
@@ -168,6 +169,11 @@ jobs:
           touch storage/database.sqlite
           export SPORA_DB_DRIVER=sqlite
           export SPORA_DB_DATABASE="$PWD/storage/database.sqlite"
+          # If SPORA_SECRET_KEY wasn't injected from a repo secret,
+          # fall back to a fresh base64 key generated via openssl.
+          if [ -z "${SPORA_SECRET_KEY:-}" ]; then
+            export SPORA_SECRET_KEY="$(openssl rand -base64 32 | tr -d '\n')"
+          fi
 
           # The spora-core CLI entrypoint refuses to run without
           # BASE_PATH defined (a real skeleton's bin/spora sets it).
