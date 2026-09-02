@@ -2,6 +2,8 @@
 
 declare(strict_types=1);
 
+const PRODUCER_TYPST_MIME = 'text/x-typst';
+
 use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
@@ -25,7 +27,7 @@ it('advertises the spora-plugin-typst plugin slug and typst.render operation', f
 
 it('accepts text/x-typst source formats', function () {
     $sources = $this->producer->supportedSourceFormats();
-    expect($sources)->toContain('text/x-typst');
+    expect($sources)->toContain(PRODUCER_TYPST_MIME);
     expect($sources)->toContain('typ');
 });
 
@@ -37,7 +39,7 @@ it('advertises pdf, png, and svg as derivative formats', function () {
 it('rejects an unsupported format with a runtime exception', function () {
     $asset = new MediaAsset();
     $asset->id = 'fake-id';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     $asset->payload = '= Hi';
 
@@ -48,7 +50,7 @@ it('rejects an unsupported format with a runtime exception', function () {
 it('compiles a simple typst source to PDF', function () {
     $asset = new MediaAsset();
     $asset->id = 'inline-1';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     $asset->payload = "= Hello\n";
 
@@ -61,7 +63,7 @@ it('compiles a simple typst source to PDF', function () {
 it('compiles a simple typst source to PNG with width and height populated', function () {
     $asset = new MediaAsset();
     $asset->id = 'inline-2';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     // Multi-page without `for` containers — Typst paginates
     // automatically when content exceeds the page height. No
@@ -79,7 +81,7 @@ it('compiles a simple typst source to PNG with width and height populated', func
 it('compiles a simple typst source to SVG', function () {
     $asset = new MediaAsset();
     $asset->id = 'inline-3';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     $asset->payload = "= Hi\n";
 
@@ -91,7 +93,7 @@ it('compiles a simple typst source to SVG', function () {
 it('raises TypstCompilationException when the inspector reports errors', function () {
     $asset = new MediaAsset();
     $asset->id = 'inline-4';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     // `= heading + unclosed string` — the inspector will flag the
     // unclosed string literal as an error.
@@ -117,7 +119,7 @@ it('raises TypstCompilationException when the inspector reports errors', functio
 it('clamps the requested page number to the document\'s page count', function () {
     $asset = new MediaAsset();
     $asset->id = 'inline-5';
-    $asset->mime_type = 'text/x-typst';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
     $asset->storage_mode = 'data_url';
     $asset->payload = "= Only\n";
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Plugins\Typst\Services;
 
 use RuntimeException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Typst\Compiler;
 use Typst\Inspector;
 use Typst\World;
@@ -91,7 +92,7 @@ final class TypstWorldFactory
         $fontDirs      = $this->fontDirs($resourcePaths);
 
         if ($fontDirs === []) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstWorldFactory: no font directories are readable (skill="%s")',
                 $resourcePaths->skillFontDirectory(),
             ));

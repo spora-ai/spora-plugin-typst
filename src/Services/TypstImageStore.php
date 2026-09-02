@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Services;
 
-use RuntimeException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 
 /**
  * Filesystem-backed image store for the Typst plugin.
@@ -37,6 +37,11 @@ final class TypstImageStore
      */
     public const MAX_BYTES = 5_242_880;
 
+    private const MIME_PNG = 'image/png';
+    private const MIME_JPEG = 'image/jpeg';
+    private const MIME_WEBP = 'image/webp';
+    private const MIME_SVG = 'image/svg+xml';
+
     /**
      * Whitelisted image MIMEs. ext-typst accepts PNG / JPEG / WebP via
      * the `#image()` builtin; SVG is allowed because Typst can embed
@@ -44,25 +49,25 @@ final class TypstImageStore
      * SVG via the same `<img src>` path as raster).
      */
     public const ALLOWED_MIMES = [
-        'image/png',
-        'image/jpeg',
-        'image/webp',
-        'image/svg+xml',
+        self::MIME_PNG,
+        self::MIME_JPEG,
+        self::MIME_WEBP,
+        self::MIME_SVG,
     ];
 
     public const MIME_TO_EXT = [
-        'image/png'     => 'png',
-        'image/jpeg'    => 'jpg',
-        'image/webp'    => 'webp',
-        'image/svg+xml' => 'svg',
+        self::MIME_PNG => 'png',
+        self::MIME_JPEG => 'jpg',
+        self::MIME_WEBP => 'webp',
+        self::MIME_SVG => 'svg',
     ];
 
     public const EXT_TO_MIME = [
-        'png'  => 'image/png',
-        'jpg'  => 'image/jpeg',
-        'jpeg' => 'image/jpeg',
-        'webp' => 'image/webp',
-        'svg'  => 'image/svg+xml',
+        'png'  => self::MIME_PNG,
+        'jpg'  => self::MIME_JPEG,
+        'jpeg' => self::MIME_JPEG,
+        'webp' => self::MIME_WEBP,
+        'svg'  => self::MIME_SVG,
     ];
 
     /**
@@ -143,17 +148,17 @@ final class TypstImageStore
     {
         $mime = strtolower(trim($mime));
         if (!in_array($mime, self::ALLOWED_MIMES, true)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: mime "%s" is not allowed (allowed: %s)',
                 $mime,
                 implode(', ', self::ALLOWED_MIMES),
             ));
         }
         if ($bytes === '') {
-            throw new RuntimeException('TypstImageStore: empty payload');
+            throw new TypstRuntimeException('TypstImageStore: empty payload');
         }
         if (strlen($bytes) > self::MAX_BYTES) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: payload exceeds %d bytes',
                 self::MAX_BYTES,
             ));
@@ -163,7 +168,7 @@ final class TypstImageStore
 
         $dir = $this->paths->principalImageDirectory();
         if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: could not create directory "%s"',
                 $dir,
             ));
@@ -171,7 +176,7 @@ final class TypstImageStore
         $path = $dir . '/' . $basename;
         $written = @file_put_contents($path, $bytes);
         if ($written === false || $written !== strlen($bytes)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: failed to write "%s"',
                 $path,
             ));
@@ -192,10 +197,10 @@ final class TypstImageStore
         $this->validateBasename($basename);
         $path = $this->paths->principalImageDirectory() . '/' . $basename;
         if (!is_file($path)) {
-            throw new RuntimeException('TypstImageStore: image not found');
+            throw new TypstRuntimeException('TypstImageStore: image not found');
         }
         if (!@unlink($path)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: failed to delete "%s"',
                 $path,
             ));
@@ -237,10 +242,10 @@ final class TypstImageStore
     private function validateBasename(string $basename): void
     {
         if ($basename === '' || $basename === '.' || $basename === '..') {
-            throw new RuntimeException('TypstImageStore: empty or reserved basename');
+            throw new TypstRuntimeException('TypstImageStore: empty or reserved basename');
         }
         if (!preg_match(self::BASENAME_PATTERN, $basename)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstImageStore: invalid basename "%s" (allowed: A-Z a-z 0-9 . _ -)',
                 $basename,
             ));

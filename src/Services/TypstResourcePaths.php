@@ -6,8 +6,8 @@ namespace Spora\Plugins\Typst\Services;
 
 use Composer\InstalledVersions;
 use OutOfBoundsException;
-use RuntimeException;
 use Spora\Core\Paths;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 
 /**
  * Computes the on-disk locations of Typst plugin resources.
@@ -125,7 +125,7 @@ final class TypstResourcePaths
         // root (see the class docblock for the rationale on the flat
         // image layout).
         if ($this->principalId === null) {
-            throw new RuntimeException('TypstResourcePaths::principalDirectory() called without a principal scope');
+            throw new TypstRuntimeException('TypstResourcePaths::principalDirectory() called without a principal scope');
         }
         return $this->paths->storage('typst') . '/' . $this->principalId;
     }
@@ -133,7 +133,7 @@ final class TypstResourcePaths
     public function principalFontDirectory(): string
     {
         if ($this->principalId === null) {
-            throw new RuntimeException('TypstResourcePaths::principalFontDirectory() called without a principal scope');
+            throw new TypstRuntimeException('TypstResourcePaths::principalFontDirectory() called without a principal scope');
         }
         return $this->principalDirectory() . '/fonts';
     }
@@ -141,7 +141,7 @@ final class TypstResourcePaths
     public function principalTemplateDirectory(): string
     {
         if ($this->principalId === null) {
-            throw new RuntimeException('TypstResourcePaths::principalTemplateDirectory() called without a principal scope');
+            throw new TypstRuntimeException('TypstResourcePaths::principalTemplateDirectory() called without a principal scope');
         }
         return $this->principalDirectory() . '/templates';
     }
@@ -149,7 +149,7 @@ final class TypstResourcePaths
     public function principalExampleDirectory(): string
     {
         if ($this->principalId === null) {
-            throw new RuntimeException('TypstResourcePaths::principalExampleDirectory() called without a principal scope');
+            throw new TypstRuntimeException('TypstResourcePaths::principalExampleDirectory() called without a principal scope');
         }
         return $this->principalDirectory() . '/examples';
     }
@@ -163,7 +163,7 @@ final class TypstResourcePaths
         // the listing by image extension so the shared directory
         // doesn't pollute the image API.
         if ($this->principalId === null) {
-            throw new RuntimeException('TypstResourcePaths::principalImageDirectory() called without a principal scope');
+            throw new TypstRuntimeException('TypstResourcePaths::principalImageDirectory() called without a principal scope');
         }
         return $this->principalDirectory();
     }
@@ -220,7 +220,7 @@ final class TypstResourcePaths
             self::KIND_FONT     => 'Fonts',
             self::KIND_TEMPLATE => 'Templates',
             self::KIND_EXAMPLE  => 'Examples',
-            default             => throw new RuntimeException(sprintf(
+            default             => throw new TypstRuntimeException(sprintf(
                 'TypstResourcePaths: unknown kind "%s"',
                 $kind,
             )),
@@ -230,7 +230,7 @@ final class TypstResourcePaths
     public static function assertValidKind(string $kind): void
     {
         if (!in_array($kind, self::KINDS, true)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourcePaths: invalid kind "%s" (must be one of: %s)',
                 $kind,
                 implode(', ', self::KINDS),
@@ -272,7 +272,7 @@ final class TypstResourcePaths
                 self::KIND_FONT     => $this->skillFontDirectory(),
                 self::KIND_TEMPLATE => $this->skillTemplateDirectory(),
                 self::KIND_EXAMPLE  => $this->skillExampleDirectory(),
-                default             => throw new RuntimeException(sprintf(
+                default             => throw new TypstRuntimeException(sprintf(
                     'TypstResourcePaths: unhandled kind "%s" (assertValidKind should have rejected this)',
                     $kind,
                 )),
@@ -284,7 +284,7 @@ final class TypstResourcePaths
             self::KIND_FONT     => $this->principalFontDirectory(),
             self::KIND_TEMPLATE => $this->principalTemplateDirectory(),
             self::KIND_EXAMPLE  => $this->principalExampleDirectory(),
-            default             => throw new RuntimeException(sprintf(
+            default             => throw new TypstRuntimeException(sprintf(
                 'TypstResourcePaths: unhandled kind "%s" (assertValidKind should have rejected this)',
                 $kind,
             )),

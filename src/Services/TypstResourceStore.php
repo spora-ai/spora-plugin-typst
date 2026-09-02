@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Services;
 
-use RuntimeException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 
 /**
  * High-level CRUD over tier-2 (principal) resources: list, write, delete.
@@ -78,7 +78,7 @@ final class TypstResourceStore
         $path = $this->paths->tierTwoPath($kind, $basename);
         $dir  = dirname($path);
         if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: could not create directory "%s"',
                 $dir,
             ));
@@ -86,7 +86,7 @@ final class TypstResourceStore
 
         $written = @file_put_contents($path, $bytes);
         if ($written === false || $written !== strlen($bytes)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: failed to write "%s"',
                 $path,
             ));
@@ -104,13 +104,13 @@ final class TypstResourceStore
         $this->validateBasename($basename);
         $path = $this->paths->tierTwoPath($kind, $basename);
         if (!is_file($path)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: resource "%s" is not writable (built-in or missing)',
                 $basename,
             ));
         }
         if (!@unlink($path)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: failed to delete "%s"',
                 $path,
             ));
@@ -139,26 +139,26 @@ final class TypstResourceStore
     private function validateBasename(string $basename): void
     {
         if ($basename === '' || $basename === '.' || $basename === '..') {
-            throw new RuntimeException('TypstResourceStore: empty or reserved basename');
+            throw new TypstRuntimeException('TypstResourceStore: empty or reserved basename');
         }
         if (!preg_match(self::BASENAME_PATTERN, $basename)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: invalid basename "%s" (allowed: A-Z a-z 0-9 . _ -)',
                 $basename,
             ));
         }
         if (strlen($basename) > 128) {
-            throw new RuntimeException('TypstResourceStore: basename exceeds 128 characters');
+            throw new TypstRuntimeException('TypstResourceStore: basename exceeds 128 characters');
         }
     }
 
     private function validateBytes(string $bytes): void
     {
         if ($bytes === '') {
-            throw new RuntimeException('TypstResourceStore: empty payload');
+            throw new TypstRuntimeException('TypstResourceStore: empty payload');
         }
         if (strlen($bytes) > self::MAX_BYTES) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstResourceStore: payload exceeds %d bytes',
                 self::MAX_BYTES,
             ));

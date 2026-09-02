@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+const COMPILE_PATH = '/api/v1/typst/compile';
+const JSON_MIME = 'application/json';
+const SKIP_NO_EXT_TYPST = 'ext-typst is not loaded';
+const HELLO_SOURCE = '= Hello';
+
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
@@ -40,10 +45,10 @@ beforeEach(function () {
 it('POST /typst/compile rejects unauthenticated callers with 401', function () {
     clearSession();
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello']),
+        server: ['CONTENT_TYPE' => JSON_MIME],
+        content: json_encode(['source' => HELLO_SOURCE]),
     );
 
     $resp = $this->controller->compile($req);
@@ -54,9 +59,9 @@ it('POST /typst/compile rejects unauthenticated callers with 401', function () {
 
 it('POST /typst/compile rejects empty source with 422', function () {
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode(['source' => '   ']),
     );
 
@@ -68,10 +73,10 @@ it('POST /typst/compile rejects empty source with 422', function () {
 
 it('POST /typst/compile rejects an unknown format with 422', function () {
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello', 'format' => 'docx']),
+        server: ['CONTENT_TYPE' => JSON_MIME],
+        content: json_encode(['source' => HELLO_SOURCE, 'format' => 'docx']),
     );
 
     $resp = $this->controller->compile($req);
@@ -86,10 +91,10 @@ it('POST /typst/compile returns 401 when the session is wiped between requests',
     // cookies but their session superglobal is gone. Belt-and-braces
     // for the auth-chain failure mode.
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello']),
+        server: ['CONTENT_TYPE' => JSON_MIME],
+        content: json_encode(['source' => HELLO_SOURCE]),
     );
     $this->auth->logOut();
     clearSession();
@@ -100,15 +105,15 @@ it('POST /typst/compile returns 401 when the session is wiped between requests',
 
 it('POST /typst/compile persists a valid PDF render and returns the asset_url', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'pdf']),
     );
 
@@ -125,15 +130,15 @@ it('POST /typst/compile persists a valid PDF render and returns the asset_url', 
 
 it('POST /typst/compile persists a PNG render and returns width + height', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'png', 'dpi' => 144]),
     );
 
@@ -150,7 +155,7 @@ it('POST /typst/compile persists a PNG render and returns width + height', funct
 
 it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
@@ -158,9 +163,9 @@ it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', fu
     // `= ` on its own with a dangling #include that the world factory
     // can't resolve forces the inspector to report an error.
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode([
             'source' => "#include \"does-not-exist.typ\"\n",
             'format' => 'pdf',
@@ -176,7 +181,7 @@ it('POST /typst/compile surfaces ext-typst diagnostics on a compile failure', fu
 
 it('POST /typst/compile strips absolute filesystem paths from diagnostic messages', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
@@ -188,9 +193,9 @@ it('POST /typst/compile strips absolute filesystem paths from diagnostic message
     // see the playground's error toast. The controller must
     // strip that.
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode([
             'source' => "#image(\"missing.jpg\")\n",
             'format' => 'pdf',
@@ -212,9 +217,9 @@ it('POST /typst/compile strips absolute filesystem paths from diagnostic message
 
 it('POST /typst/compile rejects invalid JSON with 400', function () {
     $req = Request::create(
-        '/api/v1/typst/compile',
+        COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: '{ this is not json',
     );
 

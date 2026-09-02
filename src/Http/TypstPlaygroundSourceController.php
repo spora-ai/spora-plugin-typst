@@ -9,6 +9,7 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -49,6 +50,8 @@ final class TypstPlaygroundSourceController
 {
     use JsonControllerHelpers;
 
+    private const TYPST_MIME_TYPE = 'text/x-typst';
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
@@ -73,7 +76,7 @@ final class TypstPlaygroundSourceController
         $rows = MediaAsset::query()
             ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
-            ->where('mime_type', 'text/x-typst')
+            ->where('mime_type', self::TYPST_MIME_TYPE)
             ->orderBy('updated_at', 'desc')
             ->select(['id', 'filename', 'byte_size', 'created_at', 'updated_at'])
             ->get();
@@ -164,7 +167,7 @@ final class TypstPlaygroundSourceController
         $asset->principal_id  = $principalId;
         $asset->plugin_slug   = 'spora-plugin-typst';
         $asset->tool_name     = 'typst.playground';
-        $asset->mime_type     = 'text/x-typst';
+        $asset->mime_type     = self::TYPST_MIME_TYPE;
         $asset->media_type    = 'document';
         $asset->byte_size     = strlen($content);
         $asset->filename      = $filename;
@@ -317,7 +320,7 @@ final class TypstPlaygroundSourceController
             ->where('id', $id)
             ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
-            ->where('mime_type', 'text/x-typst')
+            ->where('mime_type', self::TYPST_MIME_TYPE)
             ->first();
         if ($asset === null) {
             return $this->notFound('NOT_FOUND', 'source not found');
@@ -338,7 +341,7 @@ final class TypstPlaygroundSourceController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }

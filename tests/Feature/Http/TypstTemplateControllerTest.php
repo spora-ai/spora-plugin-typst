@@ -2,6 +2,9 @@
 
 declare(strict_types=1);
 
+const TEMPLATES_PATH = '/api/v1/typst/templates';
+const JSON_MIME = 'application/json';
+
 use Spora\Core\Paths;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
@@ -70,7 +73,7 @@ afterEach(function () {
 });
 
 it('GET /typst/templates lists the skill-shipped report.typ by default', function () {
-    $resp = $this->controller->index(Request::create('/api/v1/typst/templates', 'GET'));
+    $resp = $this->controller->index(Request::create(TEMPLATES_PATH, 'GET'));
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);
     $names = array_column($body['data']['templates'], 'name');
@@ -82,9 +85,9 @@ it('GET /typst/templates lists the skill-shipped report.typ by default', functio
 
 it('POST /typst/templates writes a template to <storage>/typst/<principal>/templates/', function () {
     $req = Request::create(
-        '/api/v1/typst/templates',
+        TEMPLATES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode(['name' => 'letter.typ', 'content' => '= Letter']),
     );
     $resp = $this->controller->store($req);
@@ -127,9 +130,9 @@ it('DELETE /typst/templates/{name} removes the file', function () {
 
 it('POST /typst/templates validates the basename and content', function () {
     $req = Request::create(
-        '/api/v1/typst/templates',
+        TEMPLATES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => JSON_MIME],
         content: json_encode(['name' => '', 'content' => '']),
     );
     $resp = $this->controller->store($req);
