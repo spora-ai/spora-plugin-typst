@@ -12,6 +12,7 @@ const PLAYGROUND_PRINCIPAL_GROUP_ID = '55555555-5555-5555-5555-000000000001';
 const PLAYGROUND_SKIP_NO_EXT_TYPST = 'ext-typst is not loaded';
 const PLAYGROUND_COMPILE_PATH = '/api/v1/typst/compile';
 const PLAYGROUND_HELLO_SOURCE = '= Hello';
+const PLAYGROUND_HELLO_WORLD_SOURCE = '= Hello, world!';
 
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\MediaAsset;
@@ -121,7 +122,7 @@ it('POST /typst/compile uses a custom name and stores the parent row with it', f
     expect($asset->filename)->toBe('letter.typ');
     expect($asset->tool_name)->toBe('typst.playground');
     expect($asset->mime_type)->toBe(PLAYGROUND_TYPST_MIME);
-    expect($asset->payload)->toBe('= Hello');
+    expect($asset->payload)->toBe(PLAYGROUND_HELLO_SOURCE);
 });
 
 it('POST /typst/compile overwrites the existing source when called again with the same name', function () {
@@ -198,7 +199,7 @@ it('GET /typst/sources lists the user\'s playground source rows', function () {
     )->id;
     $userId = (int) $this->auth->currentUserId();
 
-    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000001', $userId, $principalId, 'letter.typ', '= Hello');
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000001', $userId, $principalId, 'letter.typ', PLAYGROUND_HELLO_SOURCE);
     seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000002', $userId, $principalId, 'invoice.typ', '= Invoice');
 
     $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH, 'GET'));
@@ -343,7 +344,7 @@ it('POST /typst/sources creates a fresh row without compiling', function () {
         PLAYGROUND_SOURCES_PATH,
         'POST',
         server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
-        content: json_encode(['filename' => 'fresh.typ', 'content' => '= Hello, world!']),
+        content: json_encode(['filename' => 'fresh.typ', 'content' => PLAYGROUND_HELLO_WORLD_SOURCE]),
     );
     $resp = $this->sourceController->store($req);
     expect($resp->getStatusCode())->toBe(201);
@@ -356,7 +357,7 @@ it('POST /typst/sources creates a fresh row without compiling', function () {
     expect($row)->not->toBeNull();
     expect($row->tool_name)->toBe('typst.playground');
     expect($row->mime_type)->toBe(PLAYGROUND_TYPST_MIME);
-    expect($row->payload)->toBe('= Hello, world!');
+    expect($row->payload)->toBe(PLAYGROUND_HELLO_WORLD_SOURCE);
 });
 
 it('POST /typst/sources auto-appends .typ when the filename lacks the suffix', function () {

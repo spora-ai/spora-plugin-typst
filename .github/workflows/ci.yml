@@ -76,7 +76,7 @@ jobs:
         # Only upload from the PHP 8.4 build — the 8.5 matrix sibling
         # is identical source-wise and would race the upload step.
         if: matrix.php == '8.4'
-        uses: actions/upload-artifact@50769540e7f4bd5e679e62728bbc9e90b5a50a87 # v4.4.0
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
           name: pest-coverage
           path: coverage/
