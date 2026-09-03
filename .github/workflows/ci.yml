@@ -256,13 +256,13 @@ jobs:
         # The Pest job writes coverage/clover.xml + coverage/junit.xml
         # as workflow artifacts; pull them back so the scanner can
         # ingest them as part of its own run.
-        uses: actions/download-artifact@fa0a91d2cc73df842c9d5e5e5dd5b5215a9f0613 # v4.1.8
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
           name: pest-coverage
           path: coverage
 
       - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@ce8b54f8d1015e7e3cb1c2deb4c00e0c1b65e1d6 # v4.1.0
+        uses: SonarSource/sonarqube-scan-action@1b442ee39ac3fa7c2acdd410208dcb2bcfaae6c4 # v4.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
