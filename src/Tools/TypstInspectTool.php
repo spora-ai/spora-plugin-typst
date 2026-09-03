@@ -29,6 +29,9 @@ use Throwable;
 #[Tool(
     name: 'typst_inspect',
     description: 'Compile-check Typst source without producing a derivative. Returns the structured error and warning list from ext-typst\'s Inspector. Provide source as an inline string OR a media asset id (the .typ file).',
+    displayName: 'Typst Inspect',
+    category: 'generation',
+    icon: 'check-circle',
 )]
 #[ToolParameter(
     name: 'source',
