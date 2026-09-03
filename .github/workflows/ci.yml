@@ -266,4 +266,8 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          args: --project-base-dir=${{ github.workspace }}
+          # v8.x of the SonarSource action exposes projectBaseDir as
+          # a dedicated input (sets -Dsonar.projectBaseDir internally);
+          # passing `--project-base-dir=...` via the args input makes
+          # the scanner CLI reject the flag.
+          projectBaseDir: ${{ github.workspace }}
