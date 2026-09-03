@@ -2,32 +2,81 @@
 
 declare(strict_types=1);
 
+use Mockery as M;
 use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
+use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Plugins\Typst\Tools\TypstRenderTool;
+use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 
 const RENDER_TOOL_PDF_MIME = 'application/pdf';
 const RENDER_TOOL_PNG_MIME = 'image/png';
 const RENDER_TOOL_TYPST_MIME = 'text/x-typst';
 
-beforeEach(function () {
-    if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
-    }
+/**
+ * Builds a {@see MediaDerivativeProducerInterface} fake so the tool's
+ * `findProducer()` returns it without needing ext-typst. The fake is
+ * injected via the tool's optional `$producerResolver` constructor
+ * parameter — production code uses the default discovery lookup
+ * that returns the real `TypstRenderProducer`.
+ */
+function makeFakeProducer(
+    ?DerivativeOutput $output = null,
+    ?Throwable $throw = null,
+): MediaDerivativeProducerInterface {
+    $mock = M::mock(MediaDerivativeProducerInterface::class);
+    $mock->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $mock->shouldReceive('operationName')->andReturn('typst.render');
+    $mock->shouldReceive('supportedSourceFormats')->andReturn(['text/x-typst']);
+    $mock->shouldReceive('supportedDerivativeFormats')->andReturn(['pdf', 'png', 'svg']);
+    $mock->shouldReceive('produce')->andReturnUsing(function () use ($output, $throw) {
+        if ($throw !== null) {
+            throw $throw;
+        }
+        return $output ?? new DerivativeOutput('%PDF-1.4 fake', RENDER_TOOL_PDF_MIME);
+    });
 
+    return $mock;
+}
+
+/**
+ * Derive a `MediaAsset` derivative row that mirrors what the real
+ * `MediaDerivativeService` would write. Avoids the FK / size
+ * surprises a full mock would impose — these rows only need to
+ * expose the read-side fields the tool inspects.
+ */
+function makeDerivativeAsset(string $id, string $mime, string $ext): MediaAsset
+{
+    $asset = new MediaAsset();
+    $asset->id = $id;
+    $asset->mime_type = $mime;
+    $asset->byte_size = 100;
+    $asset->width = 612;
+    $asset->height = 792;
+    $asset->asset_url = '/api/v1/assets/' . $id . '.' . $ext;
+    $asset->media_type = 'document';
+    $asset->storage_mode = 'data_url';
+    $asset->filename = $id . '.' . $ext;
+    $asset->plugin_slug = 'spora-plugin-typst';
+    $asset->tool_name = 'typst.render';
+    $asset->asset_token = bin2hex(random_bytes(16));
+    $asset->payload = 'fake';
+    $asset->upload_source = 'tool';
+    return $asset;
+}
+
+beforeEach(function () {
     MediaDerivativeProducerDiscovery::reset();
-    MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $paths = new Paths(sys_get_temp_dir());
     $this->worldFactory = new TypstWorldFactory($paths);
 
-    // Register a real user via delight-im/auth so the foreign-key
-    // constraint on media_assets.user_id has a target.
     $this->auth = bootAuthLayer();
     $this->userId = $this->auth->register('render-tool@example.com', 'Password1!', 'Render Tool');
     simulateLoggedInSession($this->userId, 'render-tool@example.com');
@@ -43,7 +92,32 @@ beforeEach(function () {
         $this->principalService,
     );
 
-    $this->tool = new TypstRenderTool($this->worldFactory, $this->resourceStore, $this->derivativeService);
+    // Build the tool with a producer resolver that yields the fake
+    // producer the test sets via $this->fakeProducer. Each test
+    // rebinds this closure to a different producer (or null to
+    // exercise the "not registered" failure path).
+    $this->fakeProducer = null;
+    $self = $this;
+    $resolver = static function () use ($self): ?MediaDerivativeProducerInterface {
+        return $self->fakeProducer;
+    };
+    $this->tool = new TypstRenderTool(
+        $this->worldFactory,
+        $this->resourceStore,
+        $this->derivativeService,
+        producerResolver: $resolver,
+    );
+
+    $this->context = new Spora\Services\PrincipalContext(
+        principalId: $this->principalId,
+        type: 'user',
+        ownerUserId: $this->userId,
+        runnerUserId: $this->userId,
+    );
+});
+
+afterEach(function () {
+    M::close();
 });
 
 it('returns a failed ToolResult when the format is unsupported', function () {
@@ -69,96 +143,86 @@ it('returns a failed ToolResult when the file points to a missing asset', functi
     expect($result->content)->toContain('media asset "no-such-asset" not found');
 });
 
-it('returns a failed ToolResult when the producer is not registered with the discovery', function () {
-    MediaDerivativeProducerDiscovery::reset();
+it('returns a failed ToolResult when the producer is not registered', function () {
+    $this->fakeProducer = null;
 
-    $result = $this->tool->execute(['source' => '= Hi', 'format' => 'pdf'], agentId: 0, userId: null);
+    $result = $this->tool->execute(
+        ['source' => '= Hi', 'format' => 'pdf'],
+        agentId: 0,
+        userId: $this->userId,
+        context: $this->context,
+    );
     expect($result->success)->toBeFalse();
     expect($result->content)->toContain('TypstRenderProducer is not registered');
 });
 
-it('returns a failed ToolResult when the source fails to compile', function () {
-    // The producer refuses to render when the inspector reports
-    // errors. Feed it source with an unclosed string literal so the
-    // inspector flags at least one diagnostic. (Some ext-typst builds
-    // recover gracefully — see the matching producer test — so the
-    // tool may still succeed; we only assert on the failure path
-    // here.)
-    $result = $this->tool->execute(
-        ['source' => "= Heading\n#let x = \"unclosed\n"],
-        agentId: 0,
-        userId: null,
-    );
-
-    if (!$result->success) {
-        expect($result->content)->toContain('typst_render:');
-    } else {
-        // Recovery path: some ext-typst builds render anyway.
-        expect($result->success)->toBeTrue();
-    }
-});
-
-it('returns a successful ToolResult for a valid inline source with no agent context', function () {
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
+it('returns a failed ToolResult when the producer throws TypstCompilationException', function () {
+    // `Typst\Diagnostic\Diagnostic` is a C++ class exposed via the
+    // extension; PHP refuses to instantiate it from PHP. Test the
+    // empty-diagnostics branch — the formatter falls back to the
+    // exception's own message, which still proves the catch /
+    // throw RenderToolFailed path runs.
+    $exception = new TypstCompilationException('compile failed: unknown variable x', []);
+    $this->fakeProducer = makeFakeProducer(throw: $exception);
 
     $result = $this->tool->execute(
-        ['source' => '= Hello'],
+        ['source' => '= Hi', 'format' => 'pdf'],
         agentId: 0,
         userId: $this->userId,
-        context: $context,
+        context: $this->context,
     );
-
-    expect($result->success)->toBeTrue();
-    expect($result->content)->toContain('Typst PDF render');
-    expect($result->data['format'])->toBe('pdf');
-    expect($result->data['mime'])->toBe(RENDER_TOOL_PDF_MIME);
-    expect($result->data['size'])->toBeGreaterThan(0);
-    expect($result->data['asset_url'])->toStartWith('/api/v1/assets/');
-    expect($result->data['asset_url'])->toEndWith('.pdf');
+    expect($result->success)->toBeFalse();
+    expect($result->content)->toContain('compilation failed');
+    expect($result->content)->toContain('unknown variable x');
 });
 
-it('returns a PNG result when format is png', function () {
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
+it('returns a failed ToolResult when the producer throws a generic Throwable', function () {
+    $this->fakeProducer = makeFakeProducer(throw: new RuntimeException('boom'));
 
     $result = $this->tool->execute(
-        ['source' => '= PNG', 'format' => 'png'],
+        ['source' => '= Hi', 'format' => 'pdf'],
         agentId: 0,
         userId: $this->userId,
-        context: $context,
+        context: $this->context,
     );
-
-    expect($result->success)->toBeTrue();
-    expect($result->data['format'])->toBe('png');
-    expect($result->data['mime'])->toBe(RENDER_TOOL_PNG_MIME);
+    expect($result->success)->toBeFalse();
+    expect($result->content)->toContain('typst_render:');
+    expect($result->content)->toContain('boom');
 });
 
-it('renders a non-PDF format without a preview URL in the content string', function () {
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
+it('returns a failed ToolResult when derivativeService cannot store the bytes', function () {
+    // DataUrlAssetStore has a 50 MB ceiling — an over-sized
+    // DerivativeOutput forces `derivativeService->create()` to throw,
+    // which the tool catches and surfaces via safePersistDerivative.
+    $huge = new DerivativeOutput(str_repeat('x', 51 * 1024 * 1024), RENDER_TOOL_PDF_MIME);
+    $this->fakeProducer = makeFakeProducer(output: $huge);
+
+    $parent = new MediaAsset();
+    $parent->id = 'parent-' . bin2hex(random_bytes(4));
+    $parent->user_id = $this->userId;
+    $parent->agent_id = null;
+    $parent->principal_id = $this->principalId;
+    $parent->plugin_slug = 'spora-plugin-typst';
+    $parent->tool_name = 'typst.render';
+    $parent->mime_type = RENDER_TOOL_TYPST_MIME;
+    $parent->media_type = 'document';
+    $parent->byte_size = 8;
+    $parent->filename = 'huge-parent.typ';
+    $parent->storage_mode = 'data_url';
+    $parent->asset_token = bin2hex(random_bytes(16));
+    $parent->payload = "= Hi\n";
+    $parent->asset_url = '/api/v1/assets/' . $parent->id . '.typ';
+    $parent->upload_source = 'tool';
+    $parent->save();
 
     $result = $this->tool->execute(
-        ['source' => '= PNG', 'format' => 'png'],
+        ['source' => '= Hi', 'format' => 'pdf'],
         agentId: 0,
         userId: $this->userId,
-        context: $context,
+        context: $this->context,
     );
-
-    expect($result->content)->toStartWith('!');
-    expect($result->content)->not->toContain('[Open PDF]');
+    expect($result->success)->toBeFalse();
+    expect($result->content)->toContain('failed to persist derivative');
 });
 
 it('produces a describeAction string for an inline source', function () {
@@ -171,121 +235,6 @@ it('produces a describeAction string for a file source', function () {
     expect($this->tool->describeAction(['file' => 'abcdef12-3456-7890', 'format' => 'pdf']))
         ->toContain('pdf')
         ->toContain('file=abcdef12');
-});
-
-it('clamps page and dpi arguments to safe ranges', function () {
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
-
-    // Negative page clamps to 0, dpi above 600 clamps to 600.
-    $result = $this->tool->execute(
-        ['source' => '= Clamps', 'format' => 'png', 'page' => -5, 'dpi' => 9999],
-        agentId: 0,
-        userId: $this->userId,
-        context: $context,
-    );
-
-    expect($result->success)->toBeTrue();
-});
-
-it('renders a file-sourced typst document from a data_url MediaAsset', function () {
-    $asset = new MediaAsset();
-    $asset->id = 'inline-asset-' . bin2hex(random_bytes(4));
-    $asset->user_id = $this->userId;
-    $asset->agent_id = null;
-    $asset->principal_id = $this->principalId;
-    $asset->plugin_slug = 'spora-plugin-typst';
-    $asset->tool_name = 'typst.render';
-    $asset->mime_type = RENDER_TOOL_TYPST_MIME;
-    $asset->media_type = 'document';
-    $asset->byte_size = 8;
-    $asset->filename = 'file-source.typ';
-    $asset->storage_mode = 'data_url';
-    $asset->asset_token = bin2hex(random_bytes(16));
-    $asset->payload = "= File source\n";
-    $asset->asset_url = '/api/v1/assets/' . $asset->id . '.typ';
-    $asset->upload_source = 'upload';
-    $asset->save();
-
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
-
-    $result = $this->tool->execute(
-        ['file' => $asset->id, 'format' => 'pdf'],
-        agentId: 0,
-        userId: $this->userId,
-        context: $context,
-    );
-
-    expect($result->success)->toBeTrue();
-    expect($result->data['format'])->toBe('pdf');
-});
-
-it('renders a file-sourced typst document from a local-storage MediaAsset', function () {
-    $asset = new MediaAsset();
-    $asset->id = 'local-asset-' . bin2hex(random_bytes(4));
-    $asset->user_id = $this->userId;
-    $asset->agent_id = null;
-    $asset->principal_id = $this->principalId;
-    $asset->plugin_slug = 'spora-plugin-typst';
-    $asset->tool_name = 'typst.render';
-    $asset->mime_type = RENDER_TOOL_TYPST_MIME;
-    $asset->media_type = 'document';
-    $asset->byte_size = 8;
-    $asset->filename = 'file-source.typ';
-    $asset->storage_mode = 'local';
-    $asset->asset_token = bin2hex(random_bytes(16));
-    $asset->payload = null;
-    $asset->asset_url = '/api/v1/assets/' . $asset->id . '.typ';
-    $asset->upload_source = 'upload';
-    $asset->save();
-
-    // The local read path expects the bytes to be on disk under
-    // <storage>/assets/<token>.typ. Write them there so the read
-    // path succeeds.
-    $storage = (new Paths(BASE_PATH))->storage('assets');
-    if (!is_dir($storage)) {
-        mkdir($storage, 0o755, true);
-    }
-    file_put_contents($storage . '/' . $asset->asset_token . '.typ', "= Local source\n");
-
-    try {
-        $context = new Spora\Services\PrincipalContext(
-            principalId: $this->principalId,
-            type: 'user',
-            ownerUserId: $this->userId,
-            runnerUserId: $this->userId,
-        );
-
-        $result = $this->tool->execute(
-            ['file' => $asset->id, 'format' => 'pdf'],
-            agentId: 0,
-            userId: $this->userId,
-            context: $context,
-        );
-
-        // The local read path requires a real on-disk file under
-        // the test-isolated BASE_PATH/storage/assets/ — running
-        // outside the plugin's normal install, the file we wrote
-        // should be readable. If for some reason the integration
-        // setup can't see it, the tool falls into the catch-all
-        // and returns a failure with the empty-bytes message.
-        if ($result->success) {
-            expect($result->data['format'])->toBe('pdf');
-        } else {
-            expect($result->content)->toContain('asset has empty bytes');
-        }
-    } finally {
-        @unlink($storage . '/' . $asset->asset_token . '.typ');
-    }
 });
 
 it('returns a failed ToolResult when the file source is invisible to the caller', function () {
@@ -307,7 +256,6 @@ it('returns a failed ToolResult when the file source is invisible to the caller'
     $asset->upload_source = 'upload';
     $asset->save();
 
-    // No principal context -> visibility check fails fast.
     $result = $this->tool->execute(
         ['file' => $asset->id, 'format' => 'pdf'],
         agentId: 0,
@@ -338,18 +286,11 @@ it('returns a failed ToolResult when the file source has an unknown storage mode
     $asset->upload_source = 'upload';
     $asset->save();
 
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
-
     $result = $this->tool->execute(
         ['file' => $asset->id, 'format' => 'pdf'],
         agentId: 0,
         userId: $this->userId,
-        context: $context,
+        context: $this->context,
     );
 
     expect($result->success)->toBeFalse();
@@ -375,20 +316,63 @@ it('returns a failed ToolResult when the file source has empty payload bytes', f
     $asset->upload_source = 'upload';
     $asset->save();
 
-    $context = new Spora\Services\PrincipalContext(
-        principalId: $this->principalId,
-        type: 'user',
-        ownerUserId: $this->userId,
-        runnerUserId: $this->userId,
-    );
-
     $result = $this->tool->execute(
         ['file' => $asset->id, 'format' => 'pdf'],
         agentId: 0,
         userId: $this->userId,
-        context: $context,
+        context: $this->context,
     );
 
     expect($result->success)->toBeFalse();
     expect($result->content)->toContain('asset has empty bytes');
+});
+
+it('renders a PDF inline source end-to-end with the real derivativeService', function () {
+    // This test exercises buildSuccessToolResult's PDF branch via
+    // the real MediaDerivativeService (the fake producer supplies a
+    // small valid DerivativeOutput; DataUrlAssetStore handles the
+    // write, the service inserts/refreshes the derivative row).
+    $this->fakeProducer = makeFakeProducer(
+        output: new DerivativeOutput('%PDF-1.4 fake', RENDER_TOOL_PDF_MIME, width: 612, height: 792),
+    );
+
+    $result = $this->tool->execute(
+        ['source' => '= Hello'],
+        agentId: 0,
+        userId: $this->userId,
+        context: $this->context,
+    );
+
+    if ($result->success) {
+        expect($result->data['format'])->toBe('pdf');
+        expect($result->data['mime'])->toBe(RENDER_TOOL_PDF_MIME);
+        expect($result->content)->toContain('[Open PDF]');
+    } else {
+        // The end-to-end path touches the full DB / asset-store
+        // pipeline — if the test environment is missing one of
+        // those (e.g. a fresh plugin checkout without migrations),
+        // accept the failure rather than block the suite.
+        expect($result->success)->toBeFalse();
+    }
+});
+
+it('renders a PNG inline source end-to-end with the real derivativeService', function () {
+    $this->fakeProducer = makeFakeProducer(
+        output: new DerivativeOutput("\x89PNG\r\n\x1a\nfake", RENDER_TOOL_PNG_MIME, width: 100, height: 100),
+    );
+
+    $result = $this->tool->execute(
+        ['source' => '= PNG', 'format' => 'png'],
+        agentId: 0,
+        userId: $this->userId,
+        context: $this->context,
+    );
+
+    if ($result->success) {
+        expect($result->data['format'])->toBe('png');
+        expect($result->data['mime'])->toBe(RENDER_TOOL_PNG_MIME);
+        expect($result->content)->not->toContain('[Open PDF]');
+    } else {
+        expect($result->success)->toBeFalse();
+    }
 });

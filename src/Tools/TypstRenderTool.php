@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
+use Closure;
 use RuntimeException;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
@@ -12,6 +13,7 @@ use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
@@ -78,12 +80,19 @@ use Throwable;
 )]
 final class TypstRenderTool extends AbstractTypstTool
 {
+    /**
+     * @var (Closure(): ?MediaDerivativeProducerInterface)|null
+     */
+    private readonly ?Closure $producerResolver;
+
     public function __construct(
         TypstWorldFactory $worldFactory,
         \Spora\Plugins\Typst\Services\TypstResourceStore $resourceStore,
         private readonly MediaDerivativeService $derivativeService,
+        ?Closure $producerResolver = null,
     ) {
         parent::__construct($worldFactory, $resourceStore);
+        $this->producerResolver = $producerResolver;
     }
 
     public function execute(
@@ -145,7 +154,7 @@ final class TypstRenderTool extends AbstractTypstTool
      * @param array<string, mixed> $arguments
      */
     private function safeProduce(
-        TypstRenderProducer $producer,
+        MediaDerivativeProducerInterface $producer,
         MediaAsset $parent,
         string $format,
         array $arguments,
@@ -169,7 +178,7 @@ final class TypstRenderTool extends AbstractTypstTool
     }
 
     private function safePersistDerivative(
-        TypstRenderProducer $producer,
+        MediaDerivativeProducerInterface $producer,
         MediaAsset $parent,
         mixed $output,
         string $format,
@@ -242,8 +251,15 @@ final class TypstRenderTool extends AbstractTypstTool
         return sprintf('Typst render → %s (%s)', $format, $what);
     }
 
-    private function findProducer(): ?TypstRenderProducer
+    private function findProducer(): ?MediaDerivativeProducerInterface
     {
+        // Tests inject a producer resolver to bypass the discovery
+        // registry when ext-typst isn't loaded (the real producer's
+        // `produce()` requires the extension). Production code uses
+        // the default discovery lookup.
+        if ($this->producerResolver !== null) {
+            return ($this->producerResolver)();
+        }
         foreach (MediaDerivativeProducerDiscovery::all() as $class) {
             if ($class === TypstRenderProducer::class) {
                 return new $class($this->worldFactory);
