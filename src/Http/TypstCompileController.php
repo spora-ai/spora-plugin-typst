@@ -247,7 +247,7 @@ final class TypstCompileController
         // `CompileStepFailed` wraps the original `Throwable`; reach
         // through to find the real exception type when matching.
         $cause = $e->getPrevious() ?? $e;
-        $sanitised = self::sanitiseDiagnostic($e->getMessage());
+        $sanitised = TypstDiagnosticFormatter::sanitise($e->getMessage());
         return match ($step) {
             self::STEP_PERSIST_SOURCE
                 => $this->unprocessable('VALIDATION_ERROR', 'failed to persist inline source: ' . $sanitised),
@@ -279,21 +279,7 @@ final class TypstCompileController
      * Build a 422 response from the structured diagnostics on a
      * {@see TypstCompilationException}. Falls back to the exception's
      * own message when the inspector returned no diagnostics.
-     *
-     * @return list<array{message: string}>
      */
-    private function compilationFailureDiagnostics(TypstCompilationException $e): array
-    {
-        $diagnostics = [];
-        foreach ($e->diagnostics as $diag) {
-            $diagnostics[] = ['message' => self::sanitiseDiagnostic($diag->message())];
-        }
-        if ($diagnostics === []) {
-            $diagnostics[] = ['message' => self::sanitiseDiagnostic($e->getMessage())];
-        }
-        return $diagnostics;
-    }
-
     private function compilationFailureResponse(TypstCompilationException $e): JsonResponse
     {
         return new JsonResponse(
@@ -301,7 +287,7 @@ final class TypstCompileController
                 'error' => [
                     'code'       => 'COMPILATION_FAILED',
                     'message'    => 'Typst compilation failed',
-                    'diagnostics' => $this->compilationFailureDiagnostics($e),
+                    'diagnostics' => TypstDiagnosticFormatter::diagnostics($e),
                 ],
             ],
             Response::HTTP_UNPROCESSABLE_ENTITY,
@@ -501,48 +487,10 @@ final class TypstCompileController
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
     }
 
-    /**
-     * Strip the local filesystem paths that ext-typst embeds in its
-     * diagnostic messages ("file not found (searched at
-     * /Users/fabeat/Development/Spora/.../skills/typst/templates/foo.jpg)").
-     *
-     * The raw message is great for an LLM that needs to debug a
-     * build, but it's a footgun in a public-facing error surface:
-     * it leaks the operator's filesystem layout, the project's
-     * vendor / plugin paths, and sometimes the principal's home
-     * directory. Two passes:
-     *
-     *   1. replace any `(searched at <path>)` clause with
-     *      `(file not found)` — the diagnostic still tells the
-     *      user WHAT happened without telling them WHERE we looked.
-     *   2. strip any remaining absolute filesystem path
-     *      (`/Users/...`, `/home/...`, `C:\...`) and replace with
-     *      `<path>` — a final safety net for any future diagnostic
-     *      shape that we don't catch in (1).
-     */
-    private static function sanitiseDiagnostic(string $message): string
-    {
-        $message = preg_replace(
-            '/\(searched at [^)]+\)/',
-            '(file not found)',
-            $message,
-        ) ?? $message;
-        // POSIX absolute paths (incl. /Users/..., /home/..., /opt/...,
-        // /var/..., /tmp/..., /private/... on macOS).
-        $message = preg_replace(
-            '#(/[A-Za-z0-9._-]+){2,}#',
-            '<path>',
-            $message,
-        ) ?? $message;
-        // Windows-style absolute paths.
-        $message = preg_replace(
-            '#([A-Za-z]:\\\\[A-Za-z0-9._-]+){2,}#',
-            '<path>',
-            $message,
-        ) ?? $message;
-        return $message;
-    }
 }
+
+/**
+ * Validated inputs for {@see TypstCompileController::compile()}.
 
 /**
  * Validated inputs for {@see TypstCompileController::compile()}.

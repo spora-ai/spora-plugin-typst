@@ -30,12 +30,12 @@ namespace Typst {
     final class World
     {
         public function __construct(
-            public readonly ?string $template_dir = null,
-            public readonly ?int $cache_size = null,
-            public readonly bool $embed_default_fonts = false,
-            public readonly array $font_dirs = [],
-            public readonly ?string $package_dir = null,
-            public readonly ?string $namespace = null,
+            public readonly ?string $template_dir = null,    // NOSONAR php:S116 — must match ext-typst's snake_case API
+            public readonly ?int $cache_size = null,         // NOSONAR php:S116
+            public readonly bool $embed_default_fonts = false, // NOSONAR php:S116
+            public readonly array $font_dirs = [],           // NOSONAR php:S116
+            public readonly ?string $package_dir = null,    // NOSONAR php:S116
+            public readonly ?string $namespace = null,       // NOSONAR php:S116
         ) {
             // Stub for PHPStan static analysis. The real World
             // constructor is provided by the ext-typst extension at
