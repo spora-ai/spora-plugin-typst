@@ -47,6 +47,9 @@ use Throwable;
 #[Tool(
     name: 'typst_render',
     description: 'Compile a Typst source document to PDF, PNG, or SVG using ext-typst. Provide source as an inline string OR a media asset id (the .typ file). The result is stored as a media-derivative and returned as an image/PDF embed.',
+    displayName: 'Typst Render',
+    category: 'generation',
+    icon: 'file-text',
 )]
 #[ToolParameter(
     name: 'source',

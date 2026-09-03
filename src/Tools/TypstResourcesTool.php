@@ -44,6 +44,9 @@ use Throwable;
 #[Tool(
     name: 'typst_resources',
     description: 'Manage the Typst plugin\'s per-principal font, template, and example resources (list / write / delete).',
+    displayName: 'Typst Resources',
+    category: 'generation',
+    icon: 'paperclip',
 )]
 #[ToolParameter(
     name: 'kind',
