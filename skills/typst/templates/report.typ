@@ -49,8 +49,18 @@
 
   // Document-level styling knobs. Exposed so callers can theme
   // without forking the template.
-  body-font: ("Inter",),
-  heading-font: ("Inter",),
+  //
+  // Font cascade: try Inter first (designed for UI), then the
+  // bundled DejaVu Sans/Mono/Serif (DejaVu License — covers
+  // characters Inter lacks, including math and code-block glyphs).
+  // `show math.equation: set text(font: math-font)` is what wires
+  // `Latin Modern Math` (OFL) into math mode — the `$...$` and
+  // display equations need a math font and Latin Modern Math is
+  // Typst's de-facto default.
+  body-font: ("Inter", "DejaVu Sans", "DejaVu Serif"),
+  heading-font: ("Inter", "DejaVu Sans", "DejaVu Serif"),
+  mono-font: ("DejaVu Sans Mono", "Inter"),
+  math-font: ("Latin Modern Math",),
   primary: rgb("#1f2937"),
   accent:  rgb("#7c3aed"),
   paper:   "a4",
@@ -81,6 +91,13 @@
     },
   )
   set text(font: body-font, size: 10pt, fill: primary, lang: "en")
+  // Math mode needs its own font — ext-typst's Latin Modern Math
+  // fallback is disabled (see TypstWorldFactory), so without this
+  // show rule `$...$` raises "no font could be found".
+  show math.equation: set text(font: math-font)
+  // Code blocks (`#raw(block: true, ...)`) default to a serif on
+  // some Typst versions — pin them to the bundled monospace.
+  show raw: set text(font: mono-font)
   set par(justify: true, leading: 0.65em)
 
   // Headings use the accent colour and a slightly tighter leading

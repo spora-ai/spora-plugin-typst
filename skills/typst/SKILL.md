@@ -86,7 +86,7 @@ When the inspector reports errors, the producer refuses to render — the tool's
 
 When the inspector reports warnings only, the producer still renders — the warnings appear in the tool's `ok` content so you can decide whether to iterate.
 
-When the producer throws an unrelated exception (font unreadable, invalid source bytes), the tool returns the exception's message in `error`. The most common cause for fresh installs is missing tier-2 fonts — list them with `typst_resources(action="resources_list", kind="font")` and either upload the missing one or fall back to Inter.
+When the producer throws an unrelated exception (font unreadable, invalid source bytes), the tool returns the exception's message in `error`. The most common cause for fresh installs is missing tier-2 fonts — list them with `typst_resources(action="resources_list", kind="font")` and either upload the missing one or fall back to the bundled fonts.
 
 ## Tool result shape
 
@@ -140,8 +140,44 @@ Common pitfalls:
 
 - `= Heading + #unclosed raw` fails to parse. Match every `[` with `]`, every `#(` with `)`.
 - `pagebreak()` cannot appear inside a `for`/`while` content block — put it at top level only.
-- Math is `#expr` mode with TeX-like syntax: `$x^2 + y^2 = z^2$` for inline, `$ ... $` block form same syntax (no `\[...\]`).
-- The plugin ships **Inter OFL** (Regular + Bold) by default — use `font: ("Inter",)` to pick it explicitly.
+- Math is `#expr` mode with TeX-like syntax: `$x^2 + y^2 = z^2$` for inline, `$ ... $` block form same syntax (no `\[...\]`). Math mode requires a math font — see the **Fonts** section below.
+- The plugin ships Inter, DejaVu, and Latin Modern Math — see the **Fonts** section below for which families are available and the recommended cascade.
+
+## Fonts
+
+The plugin ships these font families in `<plugin>/skills/typst/fonts/`:
+
+| Family             | Weights shipped                | License             | Use for                                  |
+|--------------------|--------------------------------|---------------------|------------------------------------------|
+| `Inter`            | Regular, Bold                  | OFL-1.1             | Body / headings (designed for UI)        |
+| `DejaVu Sans`      | Regular, Bold, Italic, BoldItalic | DejaVu License      | Body fallback (broader Unicode coverage) |
+| `DejaVu Sans Mono` | Regular, Bold, Italic, BoldItalic | DejaVu License      | Code blocks (`#raw`, fenced `\`\`\``)    |
+| `DejaVu Serif`     | Regular, Bold, Italic, BoldItalic | DejaVu License      | Serif body fallback                      |
+| `Latin Modern Math`| Regular                        | OFL-1.1             | Math mode (`$...$`, display equations)   |
+
+ext-typst does NOT auto-discover system fonts — it only sees what's in
+the `font_dirs` we hand it. So even on a host that has STIX, Cambria,
+or whatever else installed, math and code blocks fail with "no font
+could be found" without the bundled fonts above.
+
+**Recommended cascade** for new documents:
+
+```typst
+#set text(font: ("Inter", "DejaVu Sans", "DejaVu Serif"))
+#show math.equation: set text(font: ("Latin Modern Math",))
+#show raw: set text(font: ("DejaVu Sans Mono",))
+```
+
+Inter is first because it's the most UI-tuned; DejaVu Sans takes over
+for characters Inter doesn't cover; DejaVu Serif is the serif fallback
+for italic body. `show math.equation` wires math mode to Latin Modern
+Math (the bundled math font), and `show raw` pins code blocks to DejaVu
+Sans Mono. The bundled `templates/report.typ` and `examples/showcase.typ`
+already declare all three — import them and the cascade comes for free.
+
+`typst_resources(action="fonts", op="write")` adds more fonts at the
+principal tier. Tier-2 wins on basename collision, so uploading a font
+named `Inter-Regular.ttf` shadows the bundled one for that principal.
 
 ## Resources
 
@@ -149,7 +185,7 @@ Three resource kinds, two tiers each:
 
 | Kind        | Purpose                                                 | Tier 1 (skill-shipped, read-only)             | Tier 2 (principal, writable)                  |
 |-------------|---------------------------------------------------------|----------------------------------------------|------------------------------------------------|
-| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter OFL)   | `<storage>/typst/fonts/<principal>/`           |
+| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter + DejaVu + Latin Modern Math) | `<storage>/typst/fonts/<principal>/`           |
 | `template`  | Full document skeletons the agent composes from data     | `<plugin>/skills/typst/templates/` (report)   | `<storage>/typst/templates/<principal>/`       |
 | `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<plugin>/skills/typst/examples/` (showcase) | `<storage>/typst/examples/<principal>/`        |
 | `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/images/<principal>/`         |
@@ -170,7 +206,7 @@ The plugin's Typst world is built per principal with:
   want to use one.
 
 - `font_dirs: [<plugin>/skills/typst/fonts/, <storage>/typst/fonts/<principal>/]`
-  — Typst searches both. Reference by basename (`font: "Inter-Regular"`)
+  — Typst searches both. Reference by family name (`font: "Inter"`)
   with no URL.
 
 ## Referencing assets
@@ -200,8 +236,9 @@ so operator-pasted playground outputs and agent-generated renders
 share one URL convention.
 
 Font references use the same path: the plugin's `font_dirs` includes
-both skill-shipped OFL fonts (Inter Regular + Bold) and principal-tier
-uploads, so just reference them by basename (`font: "Inter-Regular"`)
+both skill-shipped fonts (Inter, DejaVu Sans/Mono/Serif, Latin Modern
+Math — see the **Fonts** section above) and principal-tier uploads, so
+just reference them by family name (`font: "Inter"`).
 — no URL needed.
 
 ## Examples

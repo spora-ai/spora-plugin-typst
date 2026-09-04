@@ -22,6 +22,20 @@
 // upgrading the plugin or changing the bundled fonts.
 
 // ─────────────────────────────────────────────────────────────────
+// Document-level font setup. The plugin ships Inter (OFL) +
+// DejaVu Sans/Mono/Serif (DejaVu License) + Latin Modern Math
+// (OFL); we pin the cascade here so the example compiles standalone
+// without forcing the caller to declare fonts. ext-typst does NOT
+// carry its own fallback font table — without these `set` rules,
+// `$...$` math and `#raw` code blocks would render with "no font
+// could be found".
+// ─────────────────────────────────────────────────────────────────
+
+#set text(font: ("Inter", "DejaVu Sans", "DejaVu Serif"))
+#show math.equation: set text(font: ("Latin Modern Math",))
+#show raw: set text(font: ("DejaVu Sans Mono",))
+
+// ─────────────────────────────────────────────────────────────────
 // 1. Headings — six levels, plus an outline-friendly numbered list.
 //    Enable auto-numbering so the @label reference in section 6
 //    can resolve to a real page number.
