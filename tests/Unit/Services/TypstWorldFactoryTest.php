@@ -54,3 +54,27 @@ it('always returns at least the plugin-shipped font directory', function () {
     expect($realpathSkills)->not->toBeFalse();
     expect($dirs)->toContain($realpathSkills);
 });
+
+it('exposes a prelude that sets default text + math fonts', function () {
+    $prelude = $this->factory->prelude();
+    // Default text font cascade covers Inter (the README's "always
+    // there" font) + DejaVu Sans/Serif for principals that haven't
+    // uploaded Inter yet.
+    expect($prelude)->toContain('Inter');
+    expect($prelude)->toContain('DejaVu Sans');
+    // Math font fallback to Latin Modern Math — bundled in
+    // skills/typst/fonts/latinmodern-math.otf so ext-typst's
+    // auto-discovery can resolve math blocks without the user
+    // declaring it.
+    expect($prelude)->toContain('Latin Modern Math');
+    expect($prelude)->toContain('math.equation');
+});
+
+it('wraps user source with the prelude but keeps the user source byte-for-byte at the tail', function () {
+    $source = "= Hello\n\$x = 1$\n";
+    $wrapped = $this->factory->wrapSource($source);
+    expect($wrapped)->toStartWith('#set text(font:');
+    // The user's source must be a verbatim suffix — the prelude
+    // doesn't comment, escape, or otherwise touch their bytes.
+    expect(substr($wrapped, -strlen($source)))->toBe($source);
+});

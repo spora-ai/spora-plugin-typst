@@ -127,3 +127,46 @@ it('clamps the requested page number to the document\'s page count', function ()
     expect($output->mime)->toBe('image/png');
     expect(strlen($output->bytes))->toBeGreaterThan(50);
 });
+
+it('renders math blocks without an explicit math-font declaration', function () {
+    // ext-typst's font auto-discovery does not pick up
+    // `latinmodern-math.otf` for math mode — a bare `$x = 1$`
+    // aborts with "no font could be found". The producer's wrap
+    // prepends `#show math.equation: set text(font: "Latin Modern
+    // Math")` so a document that says nothing about fonts still
+    // renders. Operators wanting a different math font override
+    // the show rule later in their source.
+    //
+    // Single-quoted heredoc — `$` is the Typst math-mode opener and
+    // double-quoting it would let PHP interpolate it as an
+    // undefined variable, mangling the fixture.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-6';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = <<<'TYPST'
+= Math
+$x = 1$
+TYPST;
+
+    $output = $this->producer->produce($asset, 'pdf', []);
+    expect($output->mime)->toBe('application/pdf');
+    expect(strlen($output->bytes))->toBeGreaterThan(100);
+    expect($output->bytes[0])->toBe('%');  // PDF magic
+});
+
+it('honours a user-authored text font override despite the prelude', function () {
+    // The prelude's `#set text(font: ...)` is the FIRST rule in
+    // the file; a later `#set text(font: ...)` from the document
+    // overrides it. This test pins that the user can still pick
+    // a different font without the prelude fighting them.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-7';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = "#set text(font: \"DejaVu Sans\")\n= Hi\n";
+
+    $output = $this->producer->produce($asset, 'pdf', []);
+    expect($output->mime)->toBe('application/pdf');
+    expect(strlen($output->bytes))->toBeGreaterThan(100);
+});
