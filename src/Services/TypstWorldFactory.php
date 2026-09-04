@@ -59,10 +59,10 @@ use Typst\World;
  *   no principal in scope (no request has been routed yet). The
  *   constructor takes a {@see Paths} (not a {@see TypstResourcePaths})
  *   so per-request callers — the {@see TypstCompileController}, the
- *   `TypstRenderProducer`, the `TypstRenderTool`, the
- *   `TypstInspectTool` — pass the resolved principal at
- *   `build()` time. Without the principal, the world falls back to
- *   the skill-shipped templates dir as the `template_dir`, which is
+ *   `TypstRenderProducer`, the `TypstCompileTool` — pass the resolved
+ *   principal at `build()` time. Without the principal, the world falls
+ *   back to the skill-shipped templates dir as the `template_dir`,
+ *   which is
  *   the right default for background workers / CLI runs but the
  *   wrong default for any user-facing render.
  *
@@ -159,8 +159,8 @@ final class TypstWorldFactory
      * Falls back to the skill-shipped templates dir only when no
      * principal is in scope (background workers, CLI). In that case
      * we still produce a usable World against the skill-shipped
-     * content so `typst_inspect` / `typst_resources` calls don't
-     * fail in unprincipaled contexts.
+     * content so `typst_compile(action: "inspect")` / `typst_resources`
+     * calls don't fail in unprincipaled contexts.
      */
     private function templateDir(TypstResourcePaths $paths): string
     {

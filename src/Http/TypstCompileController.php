@@ -25,7 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
 /**
- * Playground-side counterpart to {@see \Spora\Plugins\Typst\Tools\TypstRenderTool}.
+ * Playground-side counterpart to {@see \Spora\Plugins\Typst\Tools\TypstCompileTool} (action=render).
  *
  * The tool exists so an LLM can ask Spora to compile Typst source; this
  * controller exists so the operator UI's Playground tab can do the same

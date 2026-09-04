@@ -40,9 +40,9 @@ use Typst\ImageOptions;
  *      a {@see TypstCompilationException}.
  *   4. Compile and dispatch to `toPdf` / `toImage` / `toSvg` based on
  *      `$format`. The first page is rendered for `png` and `svg` by
- *      design — the agent's `typst_render` parameter `page` lets the
- *      LLM ask for a specific page; absent an explicit `page`, the
- *      first page is the most useful default.
+ *      design — the agent's `typst_compile(action: "render")` parameter
+ *      `page` lets the LLM ask for a specific page; absent an explicit
+ *      `page`, the first page is the most useful default.
  *
  * Idempotency is delegated to {@see \Spora\Services\MediaArchive\MediaDerivativeService::create()},
  * which keys on `(parent_id, format, producer_plugin, producer_operation)`,
@@ -62,9 +62,9 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
 
     /**
      * Derivative formats emitted. `pdf` is the default for
-     * `typst_render` because it's the lossless container; `png` and
-     * `svg` are the per-page rendering targets used by the chat UI's
-     * `MediaEmbed::image()`.
+     * `typst_compile(action: "render")` because it's the lossless container;
+     * `png` and `svg` are the per-page rendering targets used by the chat
+     * UI's `MediaEmbed::image()`.
      */
     private const SUPPORTED_FORMATS = ['pdf', 'png', 'svg'];
 

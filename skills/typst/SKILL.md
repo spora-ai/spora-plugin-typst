@@ -1,17 +1,17 @@
 ---
 name: typst
-description: "When the user asks for a typeset document, a PDF report, a slide deck, a structured invoice or any other printed artifact rendered from a programmatic source; OR when a workspace task produces structured data (a bill of materials, a meeting summary, a chart of accounts) that the user wants in a presentable form. Use the `typst_render` tool to compile Typst source to PDF/PNG/SVG, `typst_inspect` for fast error-only feedback before rendering, and `typst_resources` to manage the per-principal font and example libraries. Recommended tools: typst_render, typst_inspect, typst_resources."
+description: "When the user asks for a typeset document, a PDF report, a slide deck, a structured invoice or any other printed artifact rendered from a programmatic source; OR when a workspace task produces structured data (a bill of materials, a meeting summary, a chart of accounts) that the user wants in a presentable form. Use the `typst_compile` tool to compile Typst source to PDF/PNG/SVG (action=render) or run an error-only pre-check (action=inspect), and `typst_resources` to manage the per-principal font, template, example, and image libraries. Recommended tools: typst_compile, typst_resources."
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.0"
+  version: "1.1"
   allowedByDefault: false
-  requiresTools: "typst_render,typst_inspect,typst_resources"
+  requiresTools: "typst_compile,typst_resources"
 ---
 
 # Typst
 
-You are an agent that produces typeset documents using Typst. Treat rendering as a structured iteration: write a draft, inspect for errors, render, inspect the output, iterate. **Never guess at Typst syntax** — when in doubt, write a tiny fragment and use `typst_inspect` first; only invoke `typst_render` once the source parses cleanly.
+You are an agent that produces typeset documents using Typst. Treat rendering as a structured iteration: write a draft, inspect for errors, render, inspect the output, iterate. **Never guess at Typst syntax** — when in doubt, write a tiny fragment and call `typst_compile(action: "inspect")` first; only call `typst_compile(action: "render")` once the source parses cleanly.
 
 ## When to use this skill
 
@@ -20,7 +20,7 @@ Trigger on any of:
 - "Make me a PDF", "Generate a report", "Typeset this", "Render this as a slide"
 - "Compile this Typst code", "Run the .typ file through Typst"
 - "I have structured data — give me a presentable document"
-- "Check whether this Typst source is valid" (use `typst_inspect`, no rendering needed)
+- "Check whether this Typst source is valid" (use `typst_compile(action: "inspect")`, no rendering needed)
 
 Do NOT use this skill for:
 
@@ -30,19 +30,19 @@ Do NOT use this skill for:
 
 ## Tool selection
 
-Three tools, three jobs:
+Two tools, three jobs:
 
-| Tool | Purpose | When |
-| --- | --- | --- |
-| `typst_inspect` | Run the inspector on a source; return structured errors and warnings only | First pass on a new source. Cheap; no media-derivative row is created. |
-| `typst_render` | Compile the source to PDF/PNG/SVG and persist it as a media-derivative | When the inspector returns clean, or when the operator has approved a known-imperfect render. |
-| `typst_resources` | List / write / delete per-principal fonts and example templates | When the user wants to upload a brand font or save a reusable template. |
+| Tool | Operation | Purpose | When |
+| --- | --- | --- | --- |
+| `typst_compile` | `action: "inspect"` | Run the inspector on a source; return structured errors and warnings only | First pass on a new source. Cheap; no media-derivative row is created. |
+| `typst_compile` | `action: "render"` | Compile the source to PDF/PNG/SVG and persist it as a media-derivative | When the inspector returns clean, or when the operator has approved a known-imperfect render. |
+| `typst_resources` | `action: "fonts" / "templates" / "examples" / "images"`, `op: "list" / "write" / "delete"` | Manage per-principal resources | When the user wants to upload a brand font, save a reusable template, or store an image asset. |
 
-For routine compiles, the flow is `typst_inspect` → fix → `typst_render`. Skip the inspect step when the user has already iterated and the source is small enough to inspect inline.
+For routine compiles, the flow is `typst_compile(action: "inspect")` → fix → `typst_compile(action: "render")`. Skip the inspect step when the user has already iterated and the source is small enough to inspect inline.
 
 ## Source location — inline vs file
 
-`typst_render` and `typst_inspect` accept the source in one of two ways:
+`typst_compile` accepts the source in one of two ways (for both `render` and `inspect`):
 
 ```jsonc
 // inline — small, ephemeral, freshly authored
@@ -104,14 +104,14 @@ Successful renders return:
 }
 ```
 
-`width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The `asset_url` is stable across re-renders — calling `typst_render` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
+`width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The `asset_url` is stable across re-renders — calling `typst_compile(action: "render")` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
 
 ## Typst syntax primer (the minimum you need)
 
 Use Typst's markup, not LaTeX, not Markdown. For the canonical
 one-page reference of every feature below, read the bundled
 `examples/showcase.typ` — it renders a complete demo document
-and is the file the operator should `typst_inspect` first when
+and is the file the operator should `typst_compile(action: "inspect")` first when
 in doubt about syntax.
 
 ```typst
@@ -185,7 +185,7 @@ Typst source, drop the URL straight into `#image()`:
 
 Upload images via `POST /api/v1/typst/images` (or the Images tab on
 the admin panel). The URL is returned in the upload response — paste
-it into your `typst_render` source.
+it into your `typst_compile(action: "render")` source.
 
 For images already in the operator's media archive (uploaded by
 other plugins or agents), use the media archive's canonical URL
@@ -211,7 +211,7 @@ Three worked examples to copy.
 ### Render a one-page invoice
 
 ```jsonc
-typst_render(
+typst_compile(action: "render", 
   source: "= Invoice\n\nFor: Acme Corp.\nTotal: \\$420.00\n",
   format: "pdf"
 )
@@ -221,19 +221,19 @@ typst_render(
 
 ```jsonc
 // pass 1: inspect for syntax errors
-typst_inspect(source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n")
+typst_compile(action: "inspect", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n")
 
 // pass 2: render once the inspector is clean
-typst_render(source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "pdf")
+typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "pdf")
 
 // pass 3: grab the first page as a thumbnail
-typst_render(source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "png", page: 0, dpi: 96)
+typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "png", page: 0, dpi: 96)
 ```
 
 ### Render from an uploaded .typ file
 
 ```jsonc
-typst_render(file: "01HXYZ_TYPSOURCE_UUID", format: "svg", page: 2)
+typst_compile(action: "render", file: "01HXYZ_TYPSOURCE_UUID", format: "svg", page: 2)
 ```
 
 ## Limits
@@ -245,8 +245,8 @@ typst_render(file: "01HXYZ_TYPSOURCE_UUID", format: "svg", page: 2)
   The renderer's `template_dir` is per-principal too, so a
   `#include` won't accidentally reach into another principal's
   templates.
-- `typst_render` always persists the derivative; there's no "preview
-  without saving" mode. Use `typst_inspect` when you don't want a
+- `typst_compile(action: "render")` always persists the derivative; there's no "preview
+  without saving" mode. Use `typst_compile(action: "inspect")` when you don't want a
   media-derivative row.
 
 ## When NOT to use Typst

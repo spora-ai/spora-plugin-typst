@@ -13,15 +13,16 @@ use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\AbstractTool;
-use Spora\Tools\Attributes\ToolParameter;
 
 /**
- * Common helpers for the three Typst plugin tools
- * (`typst_render`, `typst_inspect`, `typst_resources`).
+ * Common helpers for the two Typst plugin tools (`typst_compile` and
+ * `typst_resources`).
  *
  * Centralises:
- *   - the `action` parameter declaration (the resource tool is a
- *     multi-op dispatcher with a shared parameter schema);
+ *   - the `action` discriminator dispatch helper (the trait-owned
+ *     `#[ToolOperation]` declarations on each subclass synthesise
+ *     this property; we just read it back via the parent trait's
+ *     `getOperationName()`);
  *   - the source-resolution helper that turns an inline `source`
  *     string OR a `file` asset id into bytes + a {@see MediaAsset}
  *     parent (creating one for inline sources so the natural key on
@@ -32,15 +33,9 @@ use Spora\Tools\Attributes\ToolParameter;
  *     to inline, and reusing it across tools keeps the visible
  *     behaviour in one place.
  *
- * Subclasses call {@see resolveAction()} in `execute()` to get a
- * typed action string and then dispatch on it.
+ * Subclasses declare their `#[ToolOperation]` set on themselves;
+ * `resolveAction()` returns the discriminator value the LLM sent.
  */
-#[ToolParameter(
-    name: 'action',
-    type: 'string',
-    description: 'Which operation to perform: render | inspect | resources_list | resources_write | resources_delete (typst_render and typst_inspect ignore this; typst_resources dispatches on it).',
-    required: false,
-)]
 abstract class AbstractTypstTool extends AbstractTool
 {
     public function __construct(
@@ -50,7 +45,7 @@ abstract class AbstractTypstTool extends AbstractTool
 
     protected function resolveAction(array $arguments): string
     {
-        return strtolower(trim((string) ($arguments['action'] ?? '')));
+        return strtolower(trim($this->getOperationName($arguments)));
     }
 
     /**

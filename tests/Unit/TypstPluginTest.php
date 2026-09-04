@@ -12,8 +12,7 @@ use Spora\Plugins\Typst\Http\TypstImageController;
 use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Tools\TypstInspectTool;
-use Spora\Plugins\Typst\Tools\TypstRenderTool;
+use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Plugins\Typst\TypstApp;
 use Spora\Plugins\Typst\TypstPlugin;
@@ -59,8 +58,7 @@ it('registers every controller and tool FQCN as a PHP-DI autowire definition', f
         TypstImageController::class,
         TypstCompileController::class,
         TypstPlaygroundSourceController::class,
-        TypstRenderTool::class,
-        TypstInspectTool::class,
+        TypstCompileTool::class,
         TypstResourcesTool::class,
     ];
     foreach ($expected as $fqcn) {
@@ -72,10 +70,9 @@ it('lists TypstApp as the only contributed admin app', function () {
     expect($this->plugin->apps())->toBe([TypstApp::class]);
 });
 
-it('lists the three Typst tools in the documented order', function () {
+it('lists the two Typst tools in the documented order', function () {
     expect($this->plugin->tools())->toBe([
-        TypstRenderTool::class,
-        TypstInspectTool::class,
+        TypstCompileTool::class,
         TypstResourcesTool::class,
     ]);
 });

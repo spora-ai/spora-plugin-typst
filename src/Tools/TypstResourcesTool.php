@@ -4,55 +4,77 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
+use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
+use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
+use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
 /**
- * Read/write/delete the principal's tier-2 resources (fonts,
- * templates, and examples) used by Typst renders. The
- * plugin-shipped tier-1 resources (Inter OFL fonts, invoice
- * template, headings example) are visible to `list`/`read` but
- * cannot be deleted.
+ * Manage the Typst plugin's per-principal resources: fonts, templates,
+ * examples (text-shaped, served by {@see TypstResourceStore}) and
+ * images (binary, served by {@see TypstImageStore}). Each resource
+ * kind is a separate `#[ToolOperation]`, so the LLM-facing schema
+ * lists one row per kind instead of a single row with a kind verb.
  *
- * Multi-op dispatcher with a single shared parameter schema:
- *   - `action=resources_list`   — list fonts/templates/examples the principal can see
- *   - `action=resources_write`  — upload a new tier-2 resource
- *   - `action=resources_delete` — remove a tier-2 resource
+ * Per-op sub-action `op: list | write | delete` selects the verb.
+ * For `list`, no extra params are needed. For `write`, `name` and
+ * `content` are required (text bytes — for binary uploads use the
+ * admin panel's typst/images endpoint instead). For `delete`, only
+ * `name` is required.
  *
- * The tool's storage contract mirrors {@see TypstResourceStore}:
- * basenames are restricted to a conservative charset (the tool
+ * The plugin-shipped tier-1 resources (Inter OFL fonts, the report
+ * template, the showcase example) are visible to `list` but cannot
+ * be `delete`d — deletion is rejected for tier-1 rows by
+ * {@see TypstResourceStore::delete()} and {@see TypstImageStore::delete()}.
+ *
+ * Basenames are restricted to a conservative charset (the tool
  * rejects anything containing `/`, `\`, or shell metas before it
- * touches disk), payloads are capped at {@see TypstResourceStore::MAX_BYTES}.
- *
- * Returns machine-readable listings (action=list) or a confirmation
- * (action=write/delete). For upload/delete from the admin panel
- * use {@see \Spora\Plugins\Typst\Http\TypstFontController},
- * {@see \Spora\Plugins\Typst\Http\TypstTemplateController}, and
- * {@see \Spora\Plugins\Typst\Http\TypstExampleController} instead —
- * they enforce the same invariants over HTTP.
- *
- * `image` resources are managed through a different store
- * ({@see \Spora\Plugins\Typst\Services\TypstImageStore}) and aren't
- * reachable via this tool — upload them via the admin panel's
- * Images tab or `POST /api/v1/typst/images`.
+ * touches disk), and text payloads are capped at
+ * {@see TypstResourceStore::MAX_BYTES}.
  */
 #[Tool(
     name: 'typst_resources',
-    description: 'Manage the Typst plugin\'s per-principal font, template, and example resources (list / write / delete).',
+    description: 'Manage the Typst plugin\'s per-principal font, template, example, and image resources (list / write / delete per kind).',
     displayName: 'Typst Resources',
     category: 'generation',
     icon: 'paperclip',
 )]
+#[ToolOperation(
+    name: 'fonts',
+    description: 'Manage per-principal fonts (.ttf / .otf). list: see what fonts are visible. write: upload a new font (text bytes, capped). delete: remove a tier-2 font.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'templates',
+    description: 'Manage per-principal Typst template files. list: see visible templates. write: upload a new template (text bytes). delete: remove a tier-2 template.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'examples',
+    description: 'Manage per-principal Typst example snippets. list: see visible examples. write: upload a new example (text bytes). delete: remove a tier-2 example.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'images',
+    description: 'Manage per-principal Typst image resources. list: see visible images. write: upload a new image (text bytes — for binary uploads use the admin panel\'s typst/images endpoint instead). delete: remove a tier-2 image.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
 #[ToolParameter(
-    name: 'kind',
+    name: 'op',
     type: 'string',
-    description: 'Resource kind: font | template | example.',
-    required: true,
+    description: 'Sub-action: list (default) | write | delete.',
+    required: false,
+    enum: ['list', 'write', 'delete'],
 )]
 #[ToolParameter(
     name: 'name',
@@ -63,11 +85,19 @@ use Throwable;
 #[ToolParameter(
     name: 'content',
     type: 'string',
-    description: 'UTF-8 file contents for action=write. For binary uploads, base64-encode and pre-decode here (the tool only handles text inline).',
+    description: 'UTF-8 file contents for op=write. For binary uploads, base64-encode and pre-decode here (the tool only handles text inline).',
     required: false,
 )]
 final class TypstResourcesTool extends AbstractTypstTool
 {
+    public function __construct(
+        TypstWorldFactory $worldFactory,
+        TypstResourceStore $resourceStore,
+        private readonly TypstImageStore $imageStore,
+    ) {
+        parent::__construct($worldFactory, $resourceStore);
+    }
+
     public function execute(
         array $arguments,
         int $agentId,
@@ -75,31 +105,66 @@ final class TypstResourcesTool extends AbstractTypstTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $kind = (string) ($arguments['kind'] ?? '');
-        try {
-            TypstResourcePaths::assertValidKind($kind);
-        } catch (Throwable $e) {
-            return new ToolResult(false, $e->getMessage());
+        $action = $this->resolveAction($arguments);
+        $op     = strtolower(trim((string) ($arguments['op'] ?? 'list')));
+
+        if (!in_array($op, ['list', 'write', 'delete'], true)) {
+            return new ToolResult(false, sprintf(
+                'typst_resources: unknown op "%s" (expected: list, write, delete)',
+                $op,
+            ));
         }
 
-        return match ($this->resolveAction($arguments)) {
-            'resources_list'   => $this->listResources($kind),
-            'resources_write'  => $this->writeResource($kind, $arguments),
-            'resources_delete' => $this->deleteResource($kind, $arguments),
-            default            => new ToolResult(false, 'typst_resources: unknown action. Expected one of: resources_list, resources_write, resources_delete.'),
+        return match ($action) {
+            'fonts'     => $this->dispatchResource('font', $op, $arguments),
+            'templates' => $this->dispatchResource('template', $op, $arguments),
+            'examples'  => $this->dispatchResource('example', $op, $arguments),
+            'images'    => $this->dispatchImage($op, $arguments),
+            default     => new ToolResult(false, sprintf(
+                'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images)',
+                $action,
+            )),
         };
     }
 
     public function describeAction(array $arguments): string
     {
         $action = $this->resolveAction($arguments);
-        $kind   = (string) ($arguments['kind'] ?? '?');
+        $op     = strtolower((string) ($arguments['op'] ?? 'list'));
         $name   = (string) ($arguments['name'] ?? '');
-        return sprintf('Typst resources %s (%s%s)', $action, $kind, $name !== '' ? ':' . $name : '');
+        return sprintf('Typst resources %s/%s%s', $action, $op, $name !== '' ? ':' . $name : '');
+    }
+
+    private function dispatchResource(string $kind, string $op, array $arguments): ToolResult
+    {
+        if ($op === 'list') {
+            return $this->listResources($kind);
+        }
+        if ($op === 'write') {
+            return $this->writeResource($kind, $arguments);
+        }
+        return $this->deleteResource($kind, $arguments);
+    }
+
+    private function dispatchImage(string $op, array $arguments): ToolResult
+    {
+        if ($op === 'list') {
+            return $this->listImages();
+        }
+        if ($op === 'write') {
+            return $this->writeImage($arguments);
+        }
+        return $this->deleteImage($arguments);
     }
 
     private function listResources(string $kind): ToolResult
     {
+        try {
+            TypstResourcePaths::assertValidKind($kind);
+        } catch (Throwable $e) {
+            return new ToolResult(false, $e->getMessage());
+        }
+
         $rows = $this->resourceStore->list($kind);
         if ($rows === []) {
             return new ToolResult(true, sprintf('typst_resources: no %s resources visible', $kind));
@@ -124,9 +189,10 @@ final class TypstResourcesTool extends AbstractTypstTool
         $name    = (string) ($arguments['name'] ?? '');
         $content = $arguments['content'] ?? null;
         if ($name === '' || !is_string($content)) {
-            return new ToolResult(false, 'typst_resources: `name` and `content` are required for resources_write');
+            return new ToolResult(false, 'typst_resources: `name` and `content` are required for op=write');
         }
         try {
+            TypstResourcePaths::assertValidKind($kind);
             $path = $this->resourceStore->write($kind, $name, $content);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
@@ -141,9 +207,10 @@ final class TypstResourcesTool extends AbstractTypstTool
     {
         $name = (string) ($arguments['name'] ?? '');
         if ($name === '') {
-            return new ToolResult(false, 'typst_resources: `name` is required for resources_delete');
+            return new ToolResult(false, 'typst_resources: `name` is required for op=delete');
         }
         try {
+            TypstResourcePaths::assertValidKind($kind);
             $this->resourceStore->delete($kind, $name);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
@@ -151,6 +218,62 @@ final class TypstResourcesTool extends AbstractTypstTool
         return ToolResult::ok(
             content: sprintf('typst_resources: deleted %s/%s', $kind, $name),
             data: ['name' => $name, 'kind' => $kind],
+        );
+    }
+
+    private function listImages(): ToolResult
+    {
+        $rows = $this->imageStore->list();
+        if ($rows === []) {
+            return new ToolResult(true, 'typst_resources: no images visible');
+        }
+        $lines = [sprintf('typst_resources: %d image(s) visible', count($rows))];
+        foreach ($rows as $row) {
+            $lines[] = sprintf(
+                '- %s [%s, %d bytes]',
+                $row['name'],
+                $row['mime'],
+                $row['size'],
+            );
+        }
+        return ToolResult::ok(
+            content: implode("\n", $lines),
+            data: ['resources' => $rows],
+        );
+    }
+
+    private function writeImage(array $arguments): ToolResult
+    {
+        $name    = (string) ($arguments['name'] ?? '');
+        $content = $arguments['content'] ?? null;
+        if ($name === '' || !is_string($content)) {
+            return new ToolResult(false, 'typst_resources: `name` and `content` are required for op=write');
+        }
+        try {
+            $row = $this->imageStore->write($content, 'application/octet-stream', $name);
+        } catch (Throwable $e) {
+            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+        }
+        return ToolResult::ok(
+            content: sprintf('typst_resources: wrote %d bytes to %s', strlen($content), $row['name']),
+            data: ['name' => $row['name'], 'size' => $row['size']],
+        );
+    }
+
+    private function deleteImage(array $arguments): ToolResult
+    {
+        $name = (string) ($arguments['name'] ?? '');
+        if ($name === '') {
+            return new ToolResult(false, 'typst_resources: `name` is required for op=delete');
+        }
+        try {
+            $this->imageStore->delete($name);
+        } catch (Throwable $e) {
+            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+        }
+        return ToolResult::ok(
+            content: sprintf('typst_resources: deleted image/%s', $name),
+            data: ['name' => $name],
         );
     }
 }
