@@ -55,10 +55,6 @@ it('registers TypstRenderProducer with the media-derivatives discovery at boot',
 });
 
 it('registers TypstSourcePassthroughConverter with the media-converter discovery at boot', function () {
-    // The `.typ` text passthrough is what pulls `text/x-typst` into
-    // the upload allowlist at request time. Without it, `.typ`
-    // uploads are rejected with 415 even though the file is just
-    // UTF-8 text the LLM can read directly.
     $builder = new DI\ContainerBuilder();
     $this->plugin->register($builder);
 

@@ -73,9 +73,8 @@ final class TypstPlugin extends AbstractPlugin
 
     /**
      * Wire DI bindings for the controllers + tools, and register the
-     * `TypstRenderProducer` with the media-derivatives discovery
-     * registry so the core `/api/v1/media/{id}/derivatives` endpoint
-     * can dispatch to it.
+     * `TypstRenderProducer` and `TypstSourcePassthroughConverter` with the
+     * media discovery registries.
      *
      * PHP-DI autowires the constructors; explicit bindings here are
      * only for the cases where the host `App` cannot resolve the
@@ -99,11 +98,8 @@ final class TypstPlugin extends AbstractPlugin
         // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-        // Register the `.typ` text passthrough so a `.typ` upload is
-        // accepted by the upload allowlist (`text/x-typst` is not in
-        // core's static TEXT_MIME_TYPES; the converter-supplied branch
-        // of `MediaAllowedTypesService` pulls it in). Mirrors how the
-        // PDF converter makes `application/pdf` uploadable.
+        // `text/x-typst` is plugin-supplied, so registration adds it to
+        // the upload allowlist.
         MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
