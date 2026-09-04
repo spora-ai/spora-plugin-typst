@@ -27,6 +27,11 @@ use Symfony\Component\HttpFoundation\Response;
  * is what gives the `media_derivatives` join its natural key, so the
  * derivative (PDF / PNG / SVG) is keyed off the same parent id.
  *
+ * The listing shape was broadened to cover every `.typ` row in the
+ * principal — playground saves, LLM-generated renders, and operator
+ * uploads all share the same picker. A derived `kind` column lets
+ * the chip row scope the listing to one pool at a time.
+ *
  * This controller is the user-facing counterpart: list, open, save
  * edits, and delete. The "save edits" path (`update()`) is the one
  * the user clicks when they want to persist source changes without
@@ -35,7 +40,8 @@ use Symfony\Component\HttpFoundation\Response;
  *
  * Routes:
  *
- *   GET    /api/v1/typst/sources[?principal_id=N]  — list (filename + size + mtime)
+ *   GET    /api/v1/typst/sources[?principal_id=N&kind=…]
+ *                                                   — list (filename + size + kind + mtime)
  *   GET    /api/v1/typst/sources/{id}[?principal_id=N]      — fetch source bytes
  *   PUT    /api/v1/typst/sources/{id}[?principal_id=N]      — save edits (no compile)
  *   DELETE /api/v1/typst/sources/{id}[?principal_id=N]      — delete source + derivatives
@@ -55,13 +61,39 @@ final class TypstPlaygroundSourceController
     private const TYPST_MIME_TYPE = 'text/x-typst';
     private const DEFAULT_FILENAME = 'playground.typ';
 
+    /**
+     * Allow-list for the `?kind=` query parameter on
+     * {@see index()}. Each value maps to a filter that scopes the
+     * listing to one of the three \`.typ\` row pools in the media
+     * archive. `all` (the default) and a missing parameter both
+     * return the union. Anything outside this list surfaces as a
+     * 422 VALIDATION_ERROR.
+     */
+    private const KIND_FILTERS = ['all', 'saved', 'generated', 'uploaded'];
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
     ) {}
 
     /**
-     * GET /api/v1/typst/sources[?principal_id=N]
+     * GET /api/v1/typst/sources[?principal_id=N&kind=…]
+     *
+     * Lists every \`text/x-typst\` row owned by the requested
+     * principal — the previous shape filtered strictly to
+     * \`tool_name='typst.playground'\` and missed the LLM-generated
+     * render rows and the operator-uploaded \`.typ\` rows. The
+     * listing now surfaces all three pools with a derived \`kind\`
+     * column:
+     *
+     *   - \`saved\`      — \`tool_name='typst.playground'\`
+     *   - \`generated\`  — \`tool_name='typst.render'\`
+     *   - \`uploaded\`   — \`upload_source='upload'\`
+     *   - \`other\`      — anything that doesn't match the above
+     *
+     * \`?kind=saved|generated|uploaded|all\` filters to a single
+     * pool. The default (no \`?kind\`) is \`all\` so the picker
+     * stays open by default; the operator narrows with a chip.
      */
     public function index(Request $request): JsonResponse
     {
@@ -72,16 +104,32 @@ final class TypstPlaygroundSourceController
 
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
+            $kind = $this->resolveKind($request);
+        } catch (PlaygroundRequestFailed $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
 
-        $rows = MediaAsset::query()
+        $query = MediaAsset::query()
             ->where('principal_id', $principalId)
-            ->where('tool_name', 'typst.playground')
-            ->where('mime_type', self::TYPST_MIME_TYPE)
+            ->where('mime_type', self::TYPST_MIME_TYPE);
+
+        if ($kind !== 'all') {
+            $query->where(function ($q) use ($kind): void {
+                if ($kind === 'saved') {
+                    $q->where('tool_name', 'typst.playground');
+                } elseif ($kind === 'generated') {
+                    $q->where('tool_name', 'typst.render');
+                } else {
+                    $q->where('upload_source', 'upload');
+                }
+            });
+        }
+
+        $rows = $query
             ->orderBy('updated_at', 'desc')
-            ->select(['id', 'filename', 'byte_size', 'created_at', 'updated_at'])
+            ->select(['id', 'filename', 'byte_size', 'tool_name', 'upload_source', 'created_at', 'updated_at'])
             ->get();
 
         $sources = [];
@@ -90,12 +138,82 @@ final class TypstPlaygroundSourceController
                 'id'         => $a->id,
                 'filename'   => $a->filename,
                 'byte_size'  => (int) $a->byte_size,
+                'kind'       => $this->kindForStdClass($a),
                 'created_at' => $a->created_at !== null ? $a->created_at->toIso8601String() : null,
                 'updated_at' => $a->updated_at !== null ? $a->updated_at->toIso8601String() : null,
             ];
         }
 
         return new JsonResponse(['data' => ['sources' => $sources]]);
+    }
+
+    /**
+     * Map a listing row (a `stdClass` from the manual `->select(...)`
+     * projection) to its pool identifier. Mirrors the SQL derivation
+     * so the wire-shape `kind` is stable for callers.
+     */
+    private function kindForStdClass(object $a): string
+    {
+        $toolName     = isset($a->tool_name) ? (string) $a->tool_name : '';
+        $uploadSource = isset($a->upload_source) ? (string) $a->upload_source : '';
+        if ($toolName === 'typst.playground') {
+            return 'saved';
+        }
+        if ($toolName === 'typst.render') {
+            return 'generated';
+        }
+        if ($uploadSource === 'upload') {
+            return 'uploaded';
+        }
+        return 'other';
+    }
+
+    /**
+     * Map a {@see MediaAsset} row (single-row lookup, full
+     * attribute access) to its pool identifier. Kept separate from
+     * {@see kindForStdClass()} so a future caller can pull the same
+     * value out of a model-backed lookup without the projection
+     * shape leaking through.
+     */
+    private function kindForRow(MediaAsset $a): string
+    {
+        if ($a->tool_name === 'typst.playground') {
+            return 'saved';
+        }
+        if ($a->tool_name === 'typst.render') {
+            return 'generated';
+        }
+        if ($a->upload_source === 'upload') {
+            return 'uploaded';
+        }
+        return 'other';
+    }
+
+    /**
+     * Read and validate the \`?kind=\` query parameter. Returns
+     * \`all\` for a missing parameter; throws
+     * {@see PlaygroundRequestFailed} with a 422 envelope for any
+     * value outside {@see KIND_FILTERS}.
+     */
+    private function resolveKind(Request $request): string
+    {
+        $raw = $request->query->get('kind');
+        if ($raw === null || $raw === '') {
+            return 'all';
+        }
+        // `query->get()` returns a string after the null-or-empty
+        // narrow above; reject anything outside the allow-list with
+        // a 422 envelope so a typo in the URL fails loudly instead
+        // of silently returning the unfiltered list.
+        if (!in_array($raw, self::KIND_FILTERS, true)) {
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable(
+                    'VALIDATION_ERROR',
+                    sprintf('kind must be one of: %s', implode(', ', self::KIND_FILTERS)),
+                ),
+            );
+        }
+        return $raw;
     }
 
     /**
@@ -202,6 +320,11 @@ final class TypstPlaygroundSourceController
 
     /**
      * GET /api/v1/typst/sources/{id}[?principal_id=N]
+     *
+     * Returns the source bytes for any \`text/x-typst\` row owned
+     * by the requested principal — the previous shape filtered to
+     * \`tool_name='typst.playground'\` and silently 404'd on rows
+     * the listing now surfaces as \`generated\` or \`uploaded\`.
      */
     public function show(Request $request): JsonResponse
     {
@@ -220,6 +343,7 @@ final class TypstPlaygroundSourceController
                 'filename'   => $asset->filename,
                 'byte_size'  => (int) $asset->byte_size,
                 'mime'       => $asset->mime_type,
+                'kind'       => $this->kindForRow($asset),
                 'content'    => $payload,
                 'created_at' => $asset->created_at !== null ? $asset->created_at->toIso8601String() : null,
                 'updated_at' => $asset->updated_at !== null ? $asset->updated_at->toIso8601String() : null,
@@ -258,6 +382,7 @@ final class TypstPlaygroundSourceController
                 'id'         => $asset->id,
                 'filename'   => $asset->filename,
                 'byte_size'  => (int) $asset->byte_size,
+                'kind'       => $this->kindForRow($asset),
                 'updated_at' => $asset->updated_at->toIso8601String(),
             ],
         ]);
@@ -328,7 +453,6 @@ final class TypstPlaygroundSourceController
         $asset = MediaAsset::query()
             ->where('id', $id)
             ->where('principal_id', $principalId)
-            ->where('tool_name', 'typst.playground')
             ->where('mime_type', self::TYPST_MIME_TYPE)
             ->first();
         if ($asset === null) {

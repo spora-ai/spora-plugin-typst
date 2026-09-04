@@ -76,19 +76,55 @@ afterEach(function () {
  */
 function seedPlaygroundSource(string $id, int $userId, int $principalId, string $filename, string $payload): MediaAsset
 {
+    return seedSourceWithToolAndUpload($id, $userId, $principalId, $filename, $payload, 'typst.playground', 'tool');
+}
+
+/**
+ * Build a row that mimics what the typst render path would
+ * materialise pre-fix: `tool_name='typst.render'`, the legacy
+ * "anonymous render" tag. The new `kind` listing classifies these
+ * as `generated` so operators can distinguish them from playground
+ * saves.
+ */
+function seedTypstRenderSource(string $id, int $userId, int $principalId, string $filename, string $payload): MediaAsset
+{
+    return seedSourceWithToolAndUpload($id, $userId, $principalId, $filename, $payload, 'typst.render', 'tool');
+}
+
+/**
+ * Build a row that mimics a `.typ` file uploaded through the
+ * standard `/api/v1/media` multipart endpoint: `upload_source=
+ * 'upload'`. The new `kind` listing classifies these as `uploaded`
+ * so operators can distinguish them from playground saves and
+ * LLM renders.
+ */
+function seedUploadedSource(string $id, int $userId, int $principalId, string $filename, string $payload): MediaAsset
+{
+    return seedSourceWithToolAndUpload($id, $userId, $principalId, $filename, $payload, null, 'upload');
+}
+
+function seedSourceWithToolAndUpload(
+    string $id,
+    int $userId,
+    int $principalId,
+    string $filename,
+    string $payload,
+    ?string $toolName,
+    string $uploadSource,
+): MediaAsset {
     $row = new MediaAsset();
     $row->id            = $id;
     $row->user_id       = $userId;
     $row->principal_id  = $principalId;
-    $row->plugin_slug   = 'spora-plugin-typst';
-    $row->tool_name     = 'typst.playground';
+    $row->plugin_slug   = $toolName !== null ? 'spora-plugin-typst' : null;
+    $row->tool_name     = $toolName;
     $row->mime_type     = PLAYGROUND_TYPST_MIME;
     $row->media_type    = 'document';
     $row->byte_size     = strlen($payload);
     $row->filename      = $filename;
     $row->storage_mode  = 'data_url';
     $row->asset_token   = bin2hex(random_bytes(8));
-    $row->upload_source = 'tool';
+    $row->upload_source = $uploadSource;
     $row->payload       = $payload;
     $row->asset_url     = '/api/v1/assets/' . $id . '.typ';
     $row->created_at    = Illuminate\Support\Carbon::now();
@@ -213,6 +249,162 @@ it('GET /typst/sources lists the user\'s playground source rows', function () {
     $names = array_column($body['data']['sources'], 'filename');
     expect($names)->toContain('letter.typ')
         ->and($names)->toContain('invoice.typ');
+
+    // Each row now carries a derived `kind` column. Playground-saved
+    // rows classify as `saved`.
+    foreach ($body['data']['sources'] as $row) {
+        expect($row)->toHaveKey('kind');
+        expect($row['kind'])->toBe('saved');
+    }
+});
+
+it('GET /typst/sources includes rows with tool_name=typst.render', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000010', $userId, $principalId, 'saved.typ', '= saved');
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000011', $userId, $principalId, 'rendered.typ', '= rendered');
+
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH, 'GET'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['sources'])->toHaveCount(2);
+
+    $byKind = [];
+    foreach ($body['data']['sources'] as $row) {
+        $byKind[$row['kind']] = $row['filename'];
+    }
+    expect($byKind)->toHaveKey('saved');
+    expect($byKind)->toHaveKey('generated');
+    expect($byKind['saved'])->toBe('saved.typ');
+    expect($byKind['generated'])->toBe('rendered.typ');
+});
+
+it('GET /typst/sources includes user-uploaded .typ rows', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000020', $userId, $principalId, 'saved.typ', '= saved');
+    seedUploadedSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000021', $userId, $principalId, 'uploaded.typ', '= uploaded');
+
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH, 'GET'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['sources'])->toHaveCount(2);
+
+    $byKind = [];
+    foreach ($body['data']['sources'] as $row) {
+        $byKind[$row['kind']] = $row['filename'];
+    }
+    expect($byKind)->toHaveKey('saved');
+    expect($byKind)->toHaveKey('uploaded');
+});
+
+it('GET /typst/sources?kind=generated filters to typst.render rows', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000030', $userId, $principalId, 'saved.typ', '= saved');
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000031', $userId, $principalId, 'rendered.typ', '= rendered');
+    seedUploadedSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000032', $userId, $principalId, 'uploaded.typ', '= uploaded');
+
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH . '?kind=generated', 'GET'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['sources'])->toHaveCount(1);
+    expect($body['data']['sources'][0]['filename'])->toBe('rendered.typ');
+    expect($body['data']['sources'][0]['kind'])->toBe('generated');
+});
+
+it('GET /typst/sources?kind=uploaded filters to upload_source=upload rows', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000040', $userId, $principalId, 'saved.typ', '= saved');
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000041', $userId, $principalId, 'rendered.typ', '= rendered');
+    seedUploadedSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000042', $userId, $principalId, 'uploaded.typ', '= uploaded');
+
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH . '?kind=uploaded', 'GET'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['sources'])->toHaveCount(1);
+    expect($body['data']['sources'][0]['filename'])->toBe('uploaded.typ');
+    expect($body['data']['sources'][0]['kind'])->toBe('uploaded');
+});
+
+it('GET /typst/sources?kind=saved filters to typst.playground rows only', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000050', $userId, $principalId, 'saved.typ', '= saved');
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000051', $userId, $principalId, 'rendered.typ', '= rendered');
+    seedUploadedSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000052', $userId, $principalId, 'uploaded.typ', '= uploaded');
+
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH . '?kind=saved', 'GET'));
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['sources'])->toHaveCount(1);
+    expect($body['data']['sources'][0]['filename'])->toBe('saved.typ');
+    expect($body['data']['sources'][0]['kind'])->toBe('saved');
+});
+
+it('GET /typst/sources?kind=bogus returns 422 VALIDATION_ERROR', function () {
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH . '?kind=bogus', 'GET'));
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+it('GET /typst/sources/{id} opens a typst.render row', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000060', $userId, $principalId, 'rendered.typ', '= rendered');
+
+    $req = Request::create(PLAYGROUND_SOURCES_PATH . '/aaaaaaaa-aaaa-aaaa-aaaa-000000000060', 'GET');
+    $req->attributes->set('id', 'aaaaaaaa-aaaa-aaaa-aaaa-000000000060');
+    $resp = $this->sourceController->show($req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['filename'])->toBe('rendered.typ');
+    expect($body['data']['content'])->toBe('= rendered');
+    expect($body['data']['kind'])->toBe('generated');
+});
+
+it('PUT /typst/sources/{id} persists edits on a typst.render row', function () {
+    $principalId = (int) $this->principalService->ensureUserPrincipal(
+        (int) $this->auth->currentUserId(),
+    )->id;
+    $userId = (int) $this->auth->currentUserId();
+
+    seedTypstRenderSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000070', $userId, $principalId, 'rendered.typ', '= old');
+
+    $req = Request::create(
+        PLAYGROUND_SOURCES_PATH . '/aaaaaaaa-aaaa-aaaa-aaaa-000000000070',
+        'PUT',
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['content' => '= edited']),
+    );
+    $req->attributes->set('id', 'aaaaaaaa-aaaa-aaaa-aaaa-000000000070');
+    $resp = $this->sourceController->update($req);
+    expect($resp->getStatusCode())->toBe(200);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['kind'])->toBe('generated');
+
+    $reloaded = MediaAsset::query()->find('aaaaaaaa-aaaa-aaaa-aaaa-000000000070');
+    expect($reloaded->payload)->toBe('= edited');
 });
 
 it('GET /typst/sources/{id} returns the source bytes', function () {
