@@ -2,6 +2,18 @@
 
 declare(strict_types=1);
 
+const PLAYGROUND_TYPST_MIME = 'text/x-typst';
+const PLAYGROUND_JSON_MIME = 'application/json';
+const PLAYGROUND_SOURCES_PATH = '/api/v1/typst/sources';
+const PLAYGROUND_PASSWORD = 'Password1!';
+const PLAYGROUND_AFTER_SOURCE = '= After';
+const PLAYGROUND_PRINCIPAL_USER_ID = '44444444-4444-4444-4444-000000000001';
+const PLAYGROUND_PRINCIPAL_GROUP_ID = '55555555-5555-5555-5555-000000000001';
+const PLAYGROUND_SKIP_NO_EXT_TYPST = 'ext-typst is not loaded';
+const PLAYGROUND_COMPILE_PATH = '/api/v1/typst/compile';
+const PLAYGROUND_HELLO_SOURCE = '= Hello';
+const PLAYGROUND_HELLO_WORLD_SOURCE = '= Hello, world!';
+
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Http\TypstCompileController;
@@ -25,7 +37,7 @@ use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function () {
     $this->auth = bootAuthLayer();
-    $userId = $this->auth->register('tester@example.com', 'Password1!', 'Tester');
+    $userId = $this->auth->register('tester@example.com', PLAYGROUND_PASSWORD, 'Tester');
     simulateLoggedInSession($userId, 'tester@example.com');
 
     $this->principalService = new PrincipalService(new PrincipalResolver());
@@ -70,7 +82,7 @@ function seedPlaygroundSource(string $id, int $userId, int $principalId, string 
     $row->principal_id  = $principalId;
     $row->plugin_slug   = 'spora-plugin-typst';
     $row->tool_name     = 'typst.playground';
-    $row->mime_type     = 'text/x-typst';
+    $row->mime_type     = PLAYGROUND_TYPST_MIME;
     $row->media_type    = 'document';
     $row->byte_size     = strlen($payload);
     $row->filename      = $filename;
@@ -87,16 +99,16 @@ function seedPlaygroundSource(string $id, int $userId, int $principalId, string 
 
 it('POST /typst/compile uses a custom name and stores the parent row with it', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $req = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello', 'name' => 'letter.typ', 'format' => 'pdf']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['source' => PLAYGROUND_HELLO_SOURCE, 'name' => 'letter.typ', 'format' => 'pdf']),
     );
     $resp = $this->compileController->compile($req);
     expect($resp->getStatusCode())->toBe(200);
@@ -109,21 +121,21 @@ it('POST /typst/compile uses a custom name and stores the parent row with it', f
     expect($asset)->not->toBeNull();
     expect($asset->filename)->toBe('letter.typ');
     expect($asset->tool_name)->toBe('typst.playground');
-    expect($asset->mime_type)->toBe('text/x-typst');
-    expect($asset->payload)->toBe('= Hello');
+    expect($asset->mime_type)->toBe(PLAYGROUND_TYPST_MIME);
+    expect($asset->payload)->toBe(PLAYGROUND_HELLO_SOURCE);
 });
 
 it('POST /typst/compile overwrites the existing source when called again with the same name', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $firstReq = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['source' => '= first', 'name' => 'letter.typ', 'format' => 'pdf']),
     );
     $firstResp = $this->compileController->compile($firstReq);
@@ -131,9 +143,9 @@ it('POST /typst/compile overwrites the existing source when called again with th
     $firstId = $firstBody['data']['source_id'];
 
     $secondReq = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['source' => '= second', 'name' => 'letter.typ', 'format' => 'pdf']),
     );
     $secondResp = $this->compileController->compile($secondReq);
@@ -152,16 +164,16 @@ it('POST /typst/compile overwrites the existing source when called again with th
 
 it('POST /typst/compile appends .typ when the name lacks the suffix', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     $req = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello', 'name' => 'invoice', 'format' => 'pdf']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['source' => PLAYGROUND_HELLO_SOURCE, 'name' => 'invoice', 'format' => 'pdf']),
     );
     $resp = $this->compileController->compile($req);
     $body = json_decode((string) $resp->getContent(), true);
@@ -170,10 +182,10 @@ it('POST /typst/compile appends .typ when the name lacks the suffix', function (
 
 it('POST /typst/compile rejects names with path separators', function () {
     $req = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['source' => '= Hello', 'name' => 'sub/dir.typ', 'format' => 'pdf']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['source' => PLAYGROUND_HELLO_SOURCE, 'name' => 'sub/dir.typ', 'format' => 'pdf']),
     );
     $resp = $this->compileController->compile($req);
     expect($resp->getStatusCode())->toBe(422);
@@ -187,10 +199,10 @@ it('GET /typst/sources lists the user\'s playground source rows', function () {
     )->id;
     $userId = (int) $this->auth->currentUserId();
 
-    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000001', $userId, $principalId, 'letter.typ', '= Hello');
+    seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000001', $userId, $principalId, 'letter.typ', PLAYGROUND_HELLO_SOURCE);
     seedPlaygroundSource('aaaaaaaa-aaaa-aaaa-aaaa-000000000002', $userId, $principalId, 'invoice.typ', '= Invoice');
 
-    $resp = $this->sourceController->index(Request::create('/api/v1/typst/sources', 'GET'));
+    $resp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH, 'GET'));
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['sources'])->toHaveCount(2);
@@ -222,7 +234,7 @@ it('GET /typst/sources/{id} returns 404 for an out-of-scope source', function ()
     // Create a row under a *different* principal — the caller's lookup
     // must miss and surface a 404, not 403, so the existence of
     // someone else's file isn't leaked.
-    $otherUserId = $this->auth->register('other@example.com', 'Password1!', 'Other');
+    $otherUserId = $this->auth->register('other@example.com', PLAYGROUND_PASSWORD, 'Other');
     $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
     seedPlaygroundSource('cccccccc-cccc-cccc-cccc-000000000001', $otherUserId, $otherPrincipalId, 'private.typ', '= Hi');
 
@@ -275,8 +287,8 @@ it('PUT /typst/sources/{id} persists edits and strips stale derivatives', functi
     $req = Request::create(
         '/api/v1/typst/sources/dddddddd-dddd-dddd-dddd-000000000001',
         'PUT',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['content' => '= After']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['content' => PLAYGROUND_AFTER_SOURCE]),
     );
     $req->attributes->set('id', 'dddddddd-dddd-dddd-dddd-000000000001');
     $resp = $this->sourceController->update($req);
@@ -286,7 +298,7 @@ it('PUT /typst/sources/{id} persists edits and strips stale derivatives', functi
     expect($body['data']['byte_size'])->toBe(7);
 
     $reloaded = MediaAsset::query()->find($parent->id);
-    expect($reloaded->payload)->toBe('= After');
+    expect($reloaded->payload)->toBe(PLAYGROUND_AFTER_SOURCE);
 
     // Derivatives gone.
     $remaining = Capsule::table('media_derivatives')
@@ -303,7 +315,7 @@ it('PUT /typst/sources/{id} rejects a missing content field with 422', function 
     $req = Request::create(
         '/api/v1/typst/sources/any-id',
         'PUT',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode([]),
     );
     $req->attributes->set('id', 'any-id');
@@ -329,10 +341,10 @@ it('DELETE /typst/sources/{id} removes the parent and its derivatives', function
 
 it('POST /typst/sources creates a fresh row without compiling', function () {
     $req = Request::create(
-        '/api/v1/typst/sources',
+        PLAYGROUND_SOURCES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['filename' => 'fresh.typ', 'content' => '= Hello, world!']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['filename' => 'fresh.typ', 'content' => PLAYGROUND_HELLO_WORLD_SOURCE]),
     );
     $resp = $this->sourceController->store($req);
     expect($resp->getStatusCode())->toBe(201);
@@ -344,15 +356,15 @@ it('POST /typst/sources creates a fresh row without compiling', function () {
     $row = MediaAsset::query()->find($body['data']['id']);
     expect($row)->not->toBeNull();
     expect($row->tool_name)->toBe('typst.playground');
-    expect($row->mime_type)->toBe('text/x-typst');
-    expect($row->payload)->toBe('= Hello, world!');
+    expect($row->mime_type)->toBe(PLAYGROUND_TYPST_MIME);
+    expect($row->payload)->toBe(PLAYGROUND_HELLO_WORLD_SOURCE);
 });
 
 it('POST /typst/sources auto-appends .typ when the filename lacks the suffix', function () {
     $req = Request::create(
-        '/api/v1/typst/sources',
+        PLAYGROUND_SOURCES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['filename' => 'draft', 'content' => '= draft']),
     );
     $resp = $this->sourceController->store($req);
@@ -363,9 +375,9 @@ it('POST /typst/sources auto-appends .typ when the filename lacks the suffix', f
 
 it('POST /typst/sources rejects names with path separators', function () {
     $req = Request::create(
-        '/api/v1/typst/sources',
+        PLAYGROUND_SOURCES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['filename' => 'sub/dir.typ', 'content' => '= x']),
     );
     $resp = $this->sourceController->store($req);
@@ -376,9 +388,9 @@ it('POST /typst/sources rejects names with path separators', function () {
 
 it('POST /typst/sources rejects a missing content field with 422', function () {
     $req = Request::create(
-        '/api/v1/typst/sources',
+        PLAYGROUND_SOURCES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['filename' => 'foo.typ']),
     );
     $resp = $this->sourceController->store($req);
@@ -394,9 +406,9 @@ it('POST /typst/sources returns 409 when a row with the same filename already ex
     seedPlaygroundSource('11111111-1111-1111-1111-000000000001', (int) $this->auth->currentUserId(), $principalId, 'taken.typ', '= old');
 
     $req = Request::create(
-        '/api/v1/typst/sources',
+        PLAYGROUND_SOURCES_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['filename' => 'taken.typ', 'content' => '= new']),
     );
     $resp = $this->sourceController->store($req);
@@ -407,16 +419,16 @@ it('POST /typst/sources returns 409 when a row with the same filename already ex
 
 it('POST /typst/compile auto-appends .typ to bare names without re-creating the row', function () {
     if (!extension_loaded('typst')) {
-        $this->markTestSkipped('ext-typst is not loaded');
+        $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
     // Compile once with "draft" (no .typ) — should be stored as draft.typ.
     $firstReq = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['source' => '= one', 'name' => 'draft', 'format' => 'pdf']),
     );
     $firstResp = $this->compileController->compile($firstReq);
@@ -427,9 +439,9 @@ it('POST /typst/compile auto-appends .typ to bare names without re-creating the 
     // Compile again with the same bare name — should still resolve to
     // draft.typ and overwrite the same row.
     $secondReq = Request::create(
-        '/api/v1/typst/compile',
+        PLAYGROUND_COMPILE_PATH,
         'POST',
-        server: ['CONTENT_TYPE' => 'application/json'],
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
         content: json_encode(['source' => '= two', 'name' => 'draft', 'format' => 'pdf']),
     );
     $secondResp = $this->compileController->compile($secondReq);
@@ -455,7 +467,7 @@ it('GET /typst/sources?principal_id=N scopes the listing to that principal', fun
     seedPlaygroundSource('11111111-1111-1111-1111-000000000002', $userId, $groupPrincipalId, 'group.typ', '= Group row');
 
     // Default (no principal_id) → user-principal only.
-    $defaultResp = $this->sourceController->index(Request::create('/api/v1/typst/sources', 'GET'));
+    $defaultResp = $this->sourceController->index(Request::create(PLAYGROUND_SOURCES_PATH, 'GET'));
     $defaultBody = json_decode((string) $defaultResp->getContent(), true);
     $defaultNames = array_column($defaultBody['data']['sources'], 'filename');
     expect($defaultNames)->toContain('mine.typ')->not->toContain('group.typ');
@@ -469,7 +481,7 @@ it('GET /typst/sources?principal_id=N scopes the listing to that principal', fun
 });
 
 it('GET /typst/sources?principal_id=N returns 404 for an out-of-scope principal', function () {
-    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherUserId = $this->auth->register('outsider@example.com', PLAYGROUND_PASSWORD, 'Outsider');
     $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
 
     $req = Request::create('/api/v1/typst/sources?principal_id=' . $otherPrincipalId, 'GET');
@@ -541,20 +553,20 @@ it('PUT /typst/sources/{id}?principal_id=N persists edits under the right princi
     $group = $groupService->createGroup($userId, 'TestGroupForUpdate');
     $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
 
-    seedPlaygroundSource('44444444-4444-4444-4444-000000000001', $userId, $groupPrincipalId, 'group.typ', '= Before');
+    seedPlaygroundSource(PLAYGROUND_PRINCIPAL_USER_ID, $userId, $groupPrincipalId, 'group.typ', '= Before');
 
     $req = Request::create(
         '/api/v1/typst/sources/44444444-4444-4444-4444-000000000001?principal_id=' . $groupPrincipalId,
         'PUT',
-        server: ['CONTENT_TYPE' => 'application/json'],
-        content: json_encode(['content' => '= After']),
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['content' => PLAYGROUND_AFTER_SOURCE]),
     );
-    $req->attributes->set('id', '44444444-4444-4444-4444-000000000001');
+    $req->attributes->set('id', PLAYGROUND_PRINCIPAL_USER_ID);
     $resp = $this->sourceController->update($req);
     expect($resp->getStatusCode())->toBe(200);
 
-    $reloaded = MediaAsset::query()->find('44444444-4444-4444-4444-000000000001');
-    expect($reloaded->payload)->toBe('= After');
+    $reloaded = MediaAsset::query()->find(PLAYGROUND_PRINCIPAL_USER_ID);
+    expect($reloaded->payload)->toBe(PLAYGROUND_AFTER_SOURCE);
     expect($reloaded->principal_id)->toBe($groupPrincipalId);
 });
 
@@ -565,15 +577,15 @@ it('DELETE /typst/sources/{id}?principal_id=N removes the row scoped to that pri
     $group = $groupService->createGroup($userId, 'TestGroupForDelete');
     $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
 
-    seedPlaygroundSource('55555555-5555-5555-5555-000000000001', $userId, $groupPrincipalId, 'group.typ', '= Hi');
+    seedPlaygroundSource(PLAYGROUND_PRINCIPAL_GROUP_ID, $userId, $groupPrincipalId, 'group.typ', '= Hi');
 
     $req = Request::create(
         '/api/v1/typst/sources/55555555-5555-5555-5555-000000000001?principal_id=' . $groupPrincipalId,
         'DELETE',
     );
-    $req->attributes->set('id', '55555555-5555-5555-5555-000000000001');
+    $req->attributes->set('id', PLAYGROUND_PRINCIPAL_GROUP_ID);
     $resp = $this->sourceController->destroy($req);
     expect($resp->getStatusCode())->toBe(204);
 
-    expect(MediaAsset::query()->find('55555555-5555-5555-5555-000000000001'))->toBeNull();
+    expect(MediaAsset::query()->find(PLAYGROUND_PRINCIPAL_GROUP_ID))->toBeNull();
 });

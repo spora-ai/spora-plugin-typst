@@ -32,7 +32,10 @@ jobs:
         with:
           php-version: ${{ matrix.php }}
           extensions: curl, mbstring
-          coverage: none
+          # PCOV is faster than Xdebug and ships pre-installed on the
+          # runner; we only need coverage on the PHP 8.4 job since
+          # the matrix builds share the same source.
+          coverage: pcov
           tools: composer
 
       # ext-typst ships as a PECL extension. PECL install is the
@@ -53,7 +56,31 @@ jobs:
         run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Run Pest
-        run: ./vendor/bin/pest
+        # PHP 8.4 also produces the coverage report + JUnit XML so the
+        # SonarCloud scan job below has lcov.info to ingest. PHP 8.5
+        # runs the suite in plain mode — its purpose is to surface
+        # syntax / runtime diffs across PHP versions.
+        run: |
+          if [ "${{ matrix.php }}" = "8.4" ]; then
+            XDEBUG_MODE=coverage ./vendor/bin/pest --parallel --processes=auto --max-batch-size=50 \
+              --coverage-filter=src \
+              --coverage-clover=coverage/clover.xml \
+              --coverage-cobertura=coverage/cobertura.xml \
+              --coverage-html=coverage/html \
+              --log-junit=coverage/junit.xml
+          else
+            ./vendor/bin/pest
+          fi
+
+      - name: Upload coverage artifacts
+        # Only upload from the PHP 8.4 build — the 8.5 matrix sibling
+        # is identical source-wise and would race the upload step.
+        if: matrix.php == '8.4'
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: pest-coverage
+          path: coverage/
+          retention-days: 7
 
   static-analysis:
     name: PHPStan
@@ -200,3 +227,47 @@ jobs:
           test -f plugins/spora-plugin-typst/plugin.json || (echo "plugin.json missing" && exit 1)
           test -f plugins/spora-plugin-typst/composer.json || (echo "composer.json missing" && exit 1)
           echo "Plugin routed to plugins/spora-plugin-typst/ and manifest is in place."
+
+  sonarcloud:
+    name: SonarCloud scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    needs: test
+    steps:
+      - name: Checkout
+        # fetch-depth: 0 so SonarCloud can attribute issues via git
+        # blame; without it the "new code" computation falls back to
+        # the last commit and skews coverage / quality gate.
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
+        with:
+          php-version: '8.4'
+          coverage: pcov
+          tools: composer
+
+      - name: Install
+        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
+
+      - name: Download coverage report
+        # The Pest job writes coverage/clover.xml + coverage/junit.xml
+        # as workflow artifacts; pull them back so the scanner can
+        # ingest them as part of its own run.
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: pest-coverage
+          path: coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarqube-scan-action@22918119ff8e1ca75a623e15c8296b6ea4fbe28f # v8.2.1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          # v8.x of the SonarSource action exposes projectBaseDir as
+          # a dedicated input (sets -Dsonar.projectBaseDir internally);
+          # passing `--project-base-dir=...` via the args input makes
+          # the scanner CLI reject the flag.
+          projectBaseDir: ${{ github.workspace }}

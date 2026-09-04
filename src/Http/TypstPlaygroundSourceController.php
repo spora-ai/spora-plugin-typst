@@ -9,6 +9,7 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -49,6 +50,9 @@ final class TypstPlaygroundSourceController
 {
     use JsonControllerHelpers;
 
+    private const TYPST_MIME_TYPE = 'text/x-typst';
+    private const DEFAULT_FILENAME = 'playground.typ';
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
@@ -73,7 +77,7 @@ final class TypstPlaygroundSourceController
         $rows = MediaAsset::query()
             ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
-            ->where('mime_type', 'text/x-typst')
+            ->where('mime_type', self::TYPST_MIME_TYPE)
             ->orderBy('updated_at', 'desc')
             ->select(['id', 'filename', 'byte_size', 'created_at', 'updated_at'])
             ->get();
@@ -111,71 +115,16 @@ final class TypstPlaygroundSourceController
      */
     public function store(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            return $this->unauthenticated();
-        }
-
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $content = $body['content'] ?? null;
-        if (!is_string($content)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'content is required and must be a string');
-        }
-
-        $filename = $this->validateFilename($body['filename'] ?? null);
-        if ($filename instanceof JsonResponse) {
-            return $filename;
-        }
-
         try {
+            $userId = $this->requireUserId();
+            $inputs = $this->parseStoreInputs($request);
             $principalId = $this->resolvePrincipalId($request, $userId);
-        } catch (RuntimeException $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            $this->assertFilenameAvailable($principalId, $inputs['filename']);
+        } catch (PlaygroundRequestFailed $e) {
+            return $e->response;
         }
 
-        // Reject if a row already exists for (principal, filename) —
-        // the natural key is the same one the compile endpoint uses,
-        // so we'd otherwise create a duplicate that compile() would
-        // immediately overwrite. Force the operator to "Open" the
-        // existing row or pick a fresh filename.
-        $existing = MediaAsset::query()
-            ->where('principal_id', $principalId)
-            ->where('tool_name', 'typst.playground')
-            ->where('filename', $filename)
-            ->first();
-        if ($existing !== null) {
-            return $this->error(
-                'FILENAME_TAKEN',
-                sprintf('A playground source named "%s" already exists. Open it from the file picker to edit it.', $filename),
-                Response::HTTP_CONFLICT,
-            );
-        }
-
-        $id = self::generateUuid();
-        $now = \Illuminate\Support\Carbon::now();
-        $asset = new MediaAsset();
-        $asset->id            = $id;
-        $asset->user_id       = $userId;
-        $asset->agent_id      = null;
-        $asset->principal_id  = $principalId;
-        $asset->plugin_slug   = 'spora-plugin-typst';
-        $asset->tool_name     = 'typst.playground';
-        $asset->mime_type     = 'text/x-typst';
-        $asset->media_type    = 'document';
-        $asset->byte_size     = strlen($content);
-        $asset->filename      = $filename;
-        $asset->storage_mode  = 'data_url';
-        $asset->asset_token   = bin2hex(random_bytes(16));
-        $asset->upload_source = 'tool';
-        $asset->payload       = $content;
-        $asset->asset_url     = MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $id . '.typ';
-        $asset->created_at    = $now;
-        $asset->updated_at    = $now;
-        $asset->save();
+        $asset = $this->createSourceRow($userId, $principalId, $inputs['filename'], $inputs['content']);
 
         return new JsonResponse([
             'data' => [
@@ -188,19 +137,91 @@ final class TypstPlaygroundSourceController
         ], Response::HTTP_CREATED);
     }
 
+    private function requireUserId(): int
+    {
+        $userId = $this->auth->currentUserId();
+        if ($userId === null || $userId <= 0) {
+            throw new PlaygroundRequestFailed($this->unauthenticated());
+        }
+        return (int) $userId;
+    }
+
+    /**
+     * @return array{filename: string, content: string}
+     */
+    private function parseStoreInputs(Request $request): array
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new PlaygroundRequestFailed($body);
+        }
+        $content = $body['content'] ?? null;
+        if (!is_string($content)) {
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required and must be a string'),
+            );
+        }
+        return [
+            'filename' => $this->validateFilename($body['filename'] ?? null),
+            'content'  => $content,
+        ];
+    }
+
+    private function assertFilenameAvailable(int $principalId, string $filename): void
+    {
+        $existing = MediaAsset::query()
+            ->where('principal_id', $principalId)
+            ->where('tool_name', 'typst.playground')
+            ->where('filename', $filename)
+            ->first();
+        if ($existing === null) {
+            return;
+        }
+        throw new PlaygroundRequestFailed(
+            $this->error(
+                'FILENAME_TAKEN',
+                sprintf('A playground source named "%s" already exists. Open it from the file picker to edit it.', $filename),
+                Response::HTTP_CONFLICT,
+            ),
+        );
+    }
+
+    private function createSourceRow(int $userId, int $principalId, string $filename, string $content): MediaAsset
+    {
+        $id = self::generateUuid();
+        $now = \Illuminate\Support\Carbon::now();
+        $asset = new MediaAsset();
+        $asset->id            = $id;
+        $asset->user_id       = $userId;
+        $asset->agent_id      = null;
+        $asset->principal_id  = $principalId;
+        $asset->plugin_slug   = 'spora-plugin-typst';
+        $asset->tool_name     = 'typst.playground';
+        $asset->mime_type     = self::TYPST_MIME_TYPE;
+        $asset->media_type    = 'document';
+        $asset->byte_size     = strlen($content);
+        $asset->filename      = $filename;
+        $asset->storage_mode  = 'data_url';
+        $asset->asset_token   = bin2hex(random_bytes(16));
+        $asset->upload_source = 'tool';
+        $asset->payload       = $content;
+        $asset->asset_url     = MediaArchiveService::OPAQUE_ASSET_URL_PREFIX . $id . '.typ';
+        $asset->created_at    = $now;
+        $asset->updated_at    = $now;
+        $asset->save();
+        return $asset;
+    }
+
     /**
      * GET /api/v1/typst/sources/{id}[?principal_id=N]
      */
     public function show(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            return $this->unauthenticated();
-        }
-
-        $asset = $this->resolveOwnedSource($request, $userId);
-        if ($asset instanceof JsonResponse) {
-            return $asset;
+        try {
+            $userId = $this->requireUserId();
+            $asset = $this->resolveOwnedSource($request, $userId);
+        } catch (PlaygroundRequestFailed $e) {
+            return $e->response;
         }
 
         $payload = (string) $asset->payload;
@@ -226,24 +247,12 @@ final class TypstPlaygroundSourceController
      */
     public function update(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            return $this->unauthenticated();
-        }
-
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-
-        $content = $body['content'] ?? null;
-        if (!is_string($content)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'content is required and must be a string');
-        }
-
-        $asset = $this->resolveOwnedSource($request, $userId);
-        if ($asset instanceof JsonResponse) {
-            return $asset;
+        try {
+            $userId = $this->requireUserId();
+            $content = $this->parseUpdateContent($request);
+            $asset = $this->resolveOwnedSource($request, $userId);
+        } catch (PlaygroundRequestFailed $e) {
+            return $e->response;
         }
 
         $asset->payload    = $content;
@@ -266,6 +275,21 @@ final class TypstPlaygroundSourceController
         ]);
     }
 
+    private function parseUpdateContent(Request $request): string
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new PlaygroundRequestFailed($body);
+        }
+        $content = $body['content'] ?? null;
+        if (!is_string($content)) {
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required and must be a string'),
+            );
+        }
+        return $content;
+    }
+
     /**
      * DELETE /api/v1/typst/sources/{id}[?principal_id=N]
      *
@@ -275,14 +299,11 @@ final class TypstPlaygroundSourceController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            return $this->unauthenticated();
-        }
-
-        $asset = $this->resolveOwnedSource($request, $userId);
-        if ($asset instanceof JsonResponse) {
-            return $asset;
+        try {
+            $userId = $this->requireUserId();
+            $asset = $this->resolveOwnedSource($request, $userId);
+        } catch (PlaygroundRequestFailed $e) {
+            return $e->response;
         }
 
         $this->deleteDerivativesFor($asset->id);
@@ -301,26 +322,31 @@ final class TypstPlaygroundSourceController
      * principals check in {@see resolvePrincipalId()} gates the
      * request so the user can't reach a principal they can't act as.
      */
-    private function resolveOwnedSource(Request $request, int $userId): MediaAsset|JsonResponse
+    private function resolveOwnedSource(Request $request, int $userId): MediaAsset
     {
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            throw new PlaygroundRequestFailed(
+                $this->notFound('NOT_FOUND', $e->getMessage()),
+            );
         }
-
         $id = (string) $request->attributes->get('id', '');
         if ($id === '') {
-            return $this->notFound('NOT_FOUND', 'source not found');
+            throw new PlaygroundRequestFailed(
+                $this->notFound('NOT_FOUND', 'source not found'),
+            );
         }
         $asset = MediaAsset::query()
             ->where('id', $id)
             ->where('principal_id', $principalId)
             ->where('tool_name', 'typst.playground')
-            ->where('mime_type', 'text/x-typst')
+            ->where('mime_type', self::TYPST_MIME_TYPE)
             ->first();
         if ($asset === null) {
-            return $this->notFound('NOT_FOUND', 'source not found');
+            throw new PlaygroundRequestFailed(
+                $this->notFound('NOT_FOUND', 'source not found'),
+            );
         }
         return $asset;
     }
@@ -338,7 +364,7 @@ final class TypstPlaygroundSourceController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }
@@ -351,28 +377,35 @@ final class TypstPlaygroundSourceController
      * control bytes, and over-long names with a 422. Returns the
      * validated name (with `.typ` appended when missing) on success.
      *
-     * @return string|JsonResponse
+     * Throws {@see PlaygroundRequestFailed} on rejection so the caller
+     * stays within Sonar's S1142 budget.
      */
-    private function validateFilename(mixed $raw)
+    private function validateFilename(mixed $raw): string
     {
         if ($raw === null || $raw === '') {
-            return 'playground.typ';
+            return self::DEFAULT_FILENAME;
         }
         if (!is_string($raw)) {
-            return $this->unprocessable('VALIDATION_ERROR', 'filename must be a string');
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'filename must be a string'),
+            );
         }
         $trimmed = trim($raw);
         if ($trimmed === '') {
-            return 'playground.typ';
+            return self::DEFAULT_FILENAME;
         }
         if (preg_match('/[\x00-\x1f\x7f\/\\\\]/', $trimmed) === 1) {
-            return $this->unprocessable(
-                'VALIDATION_ERROR',
-                'filename contains illegal characters (no path separators or control bytes)',
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable(
+                    'VALIDATION_ERROR',
+                    'filename contains illegal characters (no path separators or control bytes)',
+                ),
             );
         }
         if (strlen($trimmed) > 128) {
-            return $this->unprocessable('VALIDATION_ERROR', 'filename is too long (max 128 chars)');
+            throw new PlaygroundRequestFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'filename is too long (max 128 chars)'),
+            );
         }
         if (!str_ends_with($trimmed, '.typ')) {
             $trimmed .= '.typ';
@@ -415,5 +448,20 @@ final class TypstPlaygroundSourceController
         Capsule::table('media_derivatives')
             ->where('parent_id', $parentId)
             ->delete();
+    }
+}
+
+/**
+ * Internal control-flow exception thrown by validation / lookup
+ * helpers in {@see TypstPlaygroundSourceController} to unwind
+ * request handling without piling up `return $errorResponse`
+ * statements (which Sonar's S1142 counts). Carries the JsonResponse
+ * the controller method would otherwise have returned inline.
+ */
+final class PlaygroundRequestFailed extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('playground request failed');
     }
 }

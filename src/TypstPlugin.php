@@ -16,17 +16,16 @@ use Spora\Plugins\Typst\Http\TypstImageController;
 use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Tools\TypstInspectTool;
-use Spora\Plugins\Typst\Tools\TypstRenderTool;
+use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 
 /**
  * Plugin entry point for `spora-plugin-typst`.
  *
- * Contributes one admin app (TypstApp), three LLM-callable tools
- * (`typst_render`, `typst_inspect`, `typst_resources`), nine REST
- * routes under `/api/v1/typst/{fonts,templates,examples,images,compile}*`,
+ * Contributes one admin app (TypstApp), two LLM-callable tools
+ * (`typst_compile`, `typst_resources`), the REST routes under
+ * `/api/v1/typst/{fonts,templates,examples,images,compile,sources}*`,
  * the `TypstRenderProducer` (registered with the media-derivatives
  * discovery registry), DI bindings for the controllers and tools, the
  * `skills/typst/` directory (Inter OFL fonts + a starter invoice
@@ -63,6 +62,8 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  */
 final class TypstPlugin extends AbstractPlugin
 {
+    private const SOURCES_ROUTE_PATTERN = '/api/v1/typst/sources/{id}';
+
     public function getName(): string
     {
         return (new TypstApp())->displayName();
@@ -88,8 +89,7 @@ final class TypstPlugin extends AbstractPlugin
             TypstImageController::class            => \DI\autowire(),
             TypstCompileController::class          => \DI\autowire(),
             TypstPlaygroundSourceController::class => \DI\autowire(),
-            TypstRenderTool::class                 => \DI\autowire(),
-            TypstInspectTool::class                => \DI\autowire(),
+            TypstCompileTool::class                => \DI\autowire(),
             TypstResourcesTool::class              => \DI\autowire(),
         ]);
 
@@ -142,9 +142,9 @@ final class TypstPlugin extends AbstractPlugin
         // for the operator UI.
         $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], $auth);
         $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'show'], $auth);
-        $r->addRoute('PUT', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'update'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/sources/{id}', [TypstPlaygroundSourceController::class, 'destroy'], $auth);
+        $r->addRoute('GET', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'show'], $auth);
+        $r->addRoute('PUT', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'update'], $auth);
+        $r->addRoute('DELETE', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'destroy'], $auth);
     }
 
     /**
@@ -163,8 +163,7 @@ final class TypstPlugin extends AbstractPlugin
     public function tools(): array
     {
         return [
-            TypstRenderTool::class,
-            TypstInspectTool::class,
+            TypstCompileTool::class,
             TypstResourcesTool::class,
         ];
     }

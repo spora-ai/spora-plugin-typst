@@ -28,6 +28,8 @@
     },
     "scripts": {
         "test": "pest",
+        "test:parallel": "pest --parallel --processes=auto --max-batch-size=50",
+        "test:coverage": "XDEBUG_MODE=coverage pest --parallel --processes=auto --max-batch-size=50 --coverage-filter=src --coverage-clover=coverage/clover.xml --coverage-cobertura=coverage/cobertura.xml --coverage-html=coverage/html --coverage-text=coverage/summary.txt",
         "analyse": "phpstan analyse --no-progress --memory-limit=512M",
         "lint": "php-cs-fixer fix --dry-run --diff --no-interaction",
         "format": "php-cs-fixer fix --no-interaction"

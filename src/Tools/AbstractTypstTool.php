@@ -4,24 +4,24 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
-use InvalidArgumentException;
-use RuntimeException;
 use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
-use Spora\Plugins\Typst\Services\TypstResourceStore;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\AbstractTool;
-use Spora\Tools\Attributes\ToolParameter;
 
 /**
- * Common helpers for the three Typst plugin tools
- * (`typst_render`, `typst_inspect`, `typst_resources`).
+ * Common helpers for the two Typst plugin tools (`typst_compile` and
+ * `typst_resources`).
  *
  * Centralises:
- *   - the `action` parameter declaration (the resource tool is a
- *     multi-op dispatcher with a shared parameter schema);
+ *   - the `action` discriminator dispatch helper (the trait-owned
+ *     `#[ToolOperation]` declarations on each subclass synthesise
+ *     this property; we just read it back via the parent trait's
+ *     `getOperationName()`);
  *   - the source-resolution helper that turns an inline `source`
  *     string OR a `file` asset id into bytes + a {@see MediaAsset}
  *     parent (creating one for inline sources so the natural key on
@@ -31,26 +31,38 @@ use Spora\Tools\Attributes\ToolParameter;
  *     without the 7-parameter DI chain — the rule is small enough
  *     to inline, and reusing it across tools keeps the visible
  *     behaviour in one place.
+ *   - a {@see \Spora\Core\Paths} factory (`paths()`) — the
+ *     `TypstResourcesTool` needs to build per-call
+ *     {@see \Spora\Plugins\Typst\Services\TypstResourcePaths}
+ *     instances scoped to the call's principal, but `Paths` is a
+ *     stateless value object constructed from `BASE_PATH`; sharing
+ *     the construction keeps the tools in lockstep with the HTTP
+ *     controllers.
  *
- * Subclasses call {@see resolveAction()} in `execute()` to get a
- * typed action string and then dispatch on it.
+ * Subclasses declare their `#[ToolOperation]` set on themselves;
+ * `resolveAction()` returns the discriminator value the LLM sent.
  */
-#[ToolParameter(
-    name: 'action',
-    type: 'string',
-    description: 'Which operation to perform: render | inspect | resources_list | resources_write | resources_delete (typst_render and typst_inspect ignore this; typst_resources dispatches on it).',
-    required: false,
-)]
 abstract class AbstractTypstTool extends AbstractTool
 {
     public function __construct(
         protected readonly TypstWorldFactory $worldFactory,
-        protected readonly TypstResourceStore $resourceStore,
     ) {}
+
+    /**
+     * Lazily constructs a {@see \Spora\Core\Paths} rooted at the
+     * skeleton's `BASE_PATH`. Mirrors the same construction the HTTP
+     * controllers use (`TypstFontController::paths()`), so the
+     * tool path and the HTTP path agree on `<storage>/typst/`.
+     */
+    protected function paths(): \Spora\Core\Paths
+    {
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
+        return new \Spora\Core\Paths($basePath);
+    }
 
     protected function resolveAction(array $arguments): string
     {
-        return strtolower(trim((string) ($arguments['action'] ?? '')));
+        return strtolower(trim($this->getOperationName($arguments)));
     }
 
     /**
@@ -71,7 +83,7 @@ abstract class AbstractTypstTool extends AbstractTool
             return $this->loadAssetSource($fileId, $context, $userId);
         }
 
-        throw new InvalidArgumentException(
+        throw new TypstInvalidArgumentException(
             'Typst tool: either `source` (inline string) or `file` (media asset id) is required',
         );
     }
@@ -80,22 +92,22 @@ abstract class AbstractTypstTool extends AbstractTool
     {
         $asset = MediaAsset::query()->find($fileId);
         if ($asset === null) {
-            throw new RuntimeException(sprintf('Typst tool: media asset "%s" not found', $fileId));
+            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not found', $fileId));
         }
         if (!$this->assetIsVisibleTo($asset, $context, $userId)) {
-            throw new RuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
+            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
         }
 
         $bytes = match ($asset->storage_mode) {
             'data_url' => is_string($asset->payload) ? $asset->payload : '',
             'local'    => $this->readLocalAsset($asset),
-            default    => throw new RuntimeException(sprintf(
+            default    => throw new TypstRuntimeException(sprintf(
                 'Typst tool: cannot read storage_mode "%s"',
                 (string) $asset->storage_mode,
             )),
         };
         if ($bytes === '') {
-            throw new RuntimeException('Typst tool: asset has empty bytes');
+            throw new TypstRuntimeException('Typst tool: asset has empty bytes');
         }
         return [
             'bytes'  => $bytes,
@@ -119,7 +131,12 @@ abstract class AbstractTypstTool extends AbstractTool
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
-        if ((int) $asset->user_id === (int) $ownerUserId) {
+        return $this->assetVisibility($asset, $ownerUserId, $principalId);
+    }
+
+    private function assetVisibility(MediaAsset $asset, int $ownerUserId, int $principalId): bool
+    {
+        if ((int) $asset->user_id === $ownerUserId) {
             return true;
         }
         if ($asset->agent_id === null) {
@@ -135,7 +152,7 @@ abstract class AbstractTypstTool extends AbstractTool
     {
         $token = $asset->asset_token;
         if (!is_string($token) || $token === '') {
-            throw new RuntimeException('Typst tool: asset has no token');
+            throw new TypstRuntimeException('Typst tool: asset has no token');
         }
         $ext = \Spora\Services\MediaArchive\MediaArchiveService::extensionForMime($asset->mime_type);
         $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);

@@ -61,6 +61,7 @@ it('returns skill-shipped resources even with no principal tier-2', function () 
     // We also can't assume examples are empty — only that we get an
     // array. The negative test below uses a tmp directory that
     // definitely has no principal uploads.
+    expect($examples)->toBeArray();
 });
 
 it('lists skill-shipped resources from tier 1', function () {

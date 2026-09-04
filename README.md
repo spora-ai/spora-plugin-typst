@@ -6,7 +6,7 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 
 ## What's in the box
 
-- 3 LLM-callable tools: `typst_render`, `typst_inspect`, `typst_resources`.
+- 2 LLM-callable tools: `typst_compile` (renders + inspects) and `typst_resources` (font/template/example/image CRUD per kind).
 - 7 REST routes under `/api/v1/typst/{fonts,examples,images,compile}*`.
 - 1 admin app (`/apps/typst`) — manage fonts and example templates.
 - 1 agent template (`typst-assistant`).
@@ -22,12 +22,12 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 The Typst plugin **does not depend on `spora-plugin-media-archive`**. Two
 things make this work:
 
-1. **Direct PHP integration with the derivatives core.** The `typst_render`
-   tool calls `MediaDerivativeService::create()` directly via the DI
-   container — no HTTP hop into a plugin-only controller. The derivatives
-   surface in chat via `MediaEmbed` markdown referencing the core's
-   `/api/v1/assets/<uuid>.<ext>` route (served by core's `AssetController`,
-   not by any plugin).
+1. **Direct PHP integration with the derivatives core.** The `typst_compile`
+   tool (action=render) calls `MediaDerivativeService::create()` directly via
+   the DI container — no HTTP hop into a plugin-only controller. The
+   derivatives surface in chat via `MediaEmbed` markdown referencing the
+   core's `/api/v1/assets/<uuid>.<ext>` route (served by core's
+   `AssetController`, not by any plugin).
 
 2. **Independent admin UI.** The `/apps/typst` admin panel handles Typst
    resources (fonts, examples) without crossing the Media Archive plugin's
@@ -82,11 +82,10 @@ The plugin's test suite has two parts:
 
 | Tool | Operations | Notes |
 | --- | --- | --- |
-| `typst_render` | `execute` | Compiles source → PDF / PNG / SVG. Persists as a media-derivative. The default output is `pdf`; pair with `format: png` for chat-embeddable images. |
-| `typst_inspect` | `execute` | Inspector-only pass. Returns structured errors + warnings without producing bytes. Use this to fast-iterate on a draft. |
-| `typst_resources` | `resources_list` / `resources_write` / `resources_delete` | Multi-op. Read-only or destructive ops require operator approval. |
+| `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval). `inspect` is a read-only error-only pass (auto-approved). |
+| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete`). Read-only ops are auto-approved; `write` and `delete` require approval. |
 
-`typst_render` accepts the source as either:
+`typst_compile` accepts the source as either:
 
 - `source` (inline UTF-8 Typst source) — persisted as a transient
   `text/x-typst` parent row.
@@ -156,10 +155,11 @@ SVG. The compile flow is exposed as:
 | --- | --- | --- |
 | `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, format, page, dpi }`) |
 
-The endpoint mirrors `TypstRenderTool`'s agent path: it materialises an
-inline `text/x-typst` parent row so the natural-key on `media_derivatives`
-is well-defined, runs the same `TypstRenderProducer`, persists through
-`MediaDerivativeService::create()`, and returns the canonical asset URL.
+The endpoint mirrors `TypstCompileTool`'s `action: "render"` path: it
+materialises an inline `text/x-typst` parent row so the natural-key on
+`media_derivatives` is well-defined, runs the same `TypstRenderProducer`,
+persists through `MediaDerivativeService::create()`, and returns the
+canonical asset URL.
 For PDF it also produces a first-page PNG sibling so the UI can render
 an inline preview without a second round-trip.
 
@@ -253,9 +253,8 @@ plugin loader automatically.
 │   │   └── TypstWorldFactory.php      # builds Typst\World + Compiler + Inspector
 │   └── Tools/
 │       ├── AbstractTypstTool.php      # shared source-resolution + visibility
-│       ├── TypstRenderTool.php
-│       ├── TypstInspectTool.php
-│       └── TypstResourcesTool.php
+│       ├── TypstCompileTool.php       # render / inspect
+│       └── TypstResourcesTool.php     # fonts / templates / examples / images
 ├── skills/typst/
 │   ├── SKILL.md                       # ~250 lines: workflow, syntax primer, limits
 │   └── examples/invoice.typ           # starter template

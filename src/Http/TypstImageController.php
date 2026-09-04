@@ -8,6 +8,7 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Core\Paths;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Services\PrincipalService;
@@ -35,6 +36,8 @@ final class TypstImageController
 {
     use JsonControllerHelpers;
 
+    private const MESSAGE_AUTHENTICATION_REQUIRED = 'Authentication required';
+
     public function __construct(
         private readonly AuthService $auth,
         private readonly PrincipalService $principals,
@@ -48,7 +51,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -56,7 +59,7 @@ final class TypstImageController
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
         $rows = $this->storeForPrincipal($principalId)->list();
-        $buildUrl = fn(string $name): string => $this->publicUrlFor($principalId, $name);
+        $buildUrl = fn(string $name): string => $this->publicUrlFor($name);
 
         return new JsonResponse([
             'data' => [
@@ -110,32 +113,21 @@ final class TypstImageController
      */
     public function store(Request $request): JsonResponse
     {
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $mime    = strtolower(trim((string) ($body['mime'] ?? '')));
-        $content = $body['content'] ?? null;
-        $name    = $body['filename'] ?? null;
-
-        if (!TypstImageStore::isAllowedMime($mime)) {
-            return $this->unprocessable('UNSUPPORTED_MIME', sprintf(
-                'Mime "%s" is not allowed (allowed: image/png, image/jpeg, image/webp, image/svg+xml)',
-                $mime,
-            ));
-        }
-        if (!is_string($content) || $content === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'content is required');
-        }
-
-        $bytes = $this->decodeContent($content);
         try {
-            $row = $this->storeForCurrentUser()->write($bytes, $mime, is_string($name) ? $name : null);
+            $inputs = $this->parseStoreInputs($request);
+            $bytes = $this->decodeContent($inputs['content']);
+            $row = $this->storeForCurrentUser()->write(
+                $bytes,
+                $inputs['mime'],
+                $inputs['filename'],
+            );
+        } catch (ImageValidationFailed $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
         }
 
-        $principalId = $this->principalIdForCurrentUser();
+        $this->principalIdForCurrentUser();
         return new JsonResponse([
             'data' => [
                 'image' => [
@@ -143,10 +135,45 @@ final class TypstImageController
                     'mime'        => $row['mime'],
                     'size'        => $row['size'],
                     'modified_at' => $row['modified_at'],
-                    'url'         => $this->publicUrlFor($principalId, $row['name']),
+                    'url'         => $this->publicUrlFor($row['name']),
                 ],
             ],
         ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * @return array{mime: string, content: string, filename: ?string}
+     */
+    private function parseStoreInputs(Request $request): array
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new ImageValidationFailed($body);
+        }
+
+        $mime    = strtolower(trim((string) ($body['mime'] ?? '')));
+        $content = $body['content'] ?? null;
+        $name    = $body['filename'] ?? null;
+
+        if (!TypstImageStore::isAllowedMime($mime)) {
+            throw new ImageValidationFailed(
+                $this->unprocessable('UNSUPPORTED_MIME', sprintf(
+                    'Mime "%s" is not allowed (allowed: image/png, image/jpeg, image/webp, image/svg+xml)',
+                    $mime,
+                )),
+            );
+        }
+        if (!is_string($content) || $content === '') {
+            throw new ImageValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required'),
+            );
+        }
+
+        return [
+            'mime'     => $mime,
+            'content'  => $content,
+            'filename' => is_string($name) ? $name : null,
+        ];
     }
 
     /**
@@ -168,7 +195,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         return $this->storeForPrincipal($this->principalIdForCurrentUser());
     }
@@ -183,7 +210,7 @@ final class TypstImageController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
         return $this->principals->ensureUserPrincipal($userId)->id;
     }
@@ -196,12 +223,12 @@ final class TypstImageController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }
 
-    private function publicUrlFor(int $principalId, string $name): string
+    private function publicUrlFor(string $name): string
     {
         return '/api/v1/typst/images/' . rawurlencode($name);
     }
@@ -231,5 +258,19 @@ final class TypstImageController
             }
         }
         return $content;
+    }
+}
+
+/**
+ * Internal control-flow exception thrown by
+ * {@see TypstImageController::parseStoreInputs()} to unwind request
+ * parsing without piling up `return $errorResponse` statements
+ * (SonarCloud's S1142 budget).
+ */
+final class ImageValidationFailed extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('image validation failed');
     }
 }

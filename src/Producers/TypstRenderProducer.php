@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Producers;
 
-use RuntimeException;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaArchiveService;
@@ -40,9 +40,9 @@ use Typst\ImageOptions;
  *      a {@see TypstCompilationException}.
  *   4. Compile and dispatch to `toPdf` / `toImage` / `toSvg` based on
  *      `$format`. The first page is rendered for `png` and `svg` by
- *      design — the agent's `typst_render` parameter `page` lets the
- *      LLM ask for a specific page; absent an explicit `page`, the
- *      first page is the most useful default.
+ *      design — the agent's `typst_compile(action: "render")` parameter
+ *      `page` lets the LLM ask for a specific page; absent an explicit
+ *      `page`, the first page is the most useful default.
  *
  * Idempotency is delegated to {@see \Spora\Services\MediaArchive\MediaDerivativeService::create()},
  * which keys on `(parent_id, format, producer_plugin, producer_operation)`,
@@ -62,9 +62,9 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
 
     /**
      * Derivative formats emitted. `pdf` is the default for
-     * `typst_render` because it's the lossless container; `png` and
-     * `svg` are the per-page rendering targets used by the chat UI's
-     * `MediaEmbed::image()`.
+     * `typst_compile(action: "render")` because it's the lossless container;
+     * `png` and `svg` are the per-page rendering targets used by the chat
+     * UI's `MediaEmbed::image()`.
      */
     private const SUPPORTED_FORMATS = ['pdf', 'png', 'svg'];
 
@@ -107,7 +107,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
     {
         $format = strtolower($format);
         if (!in_array($format, self::SUPPORTED_FORMATS, true)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: unsupported derivative format "%s" (supported: %s)',
                 $format,
                 implode(', ', self::SUPPORTED_FORMATS),
@@ -213,13 +213,13 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         $bytes = match ($asset->storage_mode) {
             'data_url' => $this->readDataUrlBytes($asset),
             'local'    => $this->readLocalBytes($asset),
-            default    => throw new RuntimeException(sprintf(
+            default    => throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: storage_mode "%s" has no materialised bytes',
                 (string) $asset->storage_mode,
             )),
         };
         if ($bytes === '') {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: MediaAsset %s has empty source bytes',
                 $asset->id,
             ));
@@ -231,7 +231,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
     {
         $payload = $asset->payload;
         if (!is_string($payload) || $payload === '') {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: MediaAsset %s has empty data_url payload',
                 $asset->id,
             ));
@@ -243,7 +243,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
     {
         $token = $asset->asset_token;
         if (!is_string($token) || $token === '') {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: MediaAsset %s has no asset_token',
                 $asset->id,
             ));
@@ -251,7 +251,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         $mime = strtolower((string) $asset->mime_type);
         $ext  = self::SOURCE_MIME_TO_EXT[$mime] ?? MediaArchiveService::extensionForMime($mime);
         if ($ext === null) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: cannot derive file extension for source MIME "%s"',
                 $mime,
             ));
@@ -270,7 +270,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
             restore_error_handler();
         }
         if (!is_string($bytes)) {
-            throw new RuntimeException(sprintf(
+            throw new TypstRuntimeException(sprintf(
                 'TypstRenderProducer: MediaAsset %s local file unreadable: %s',
                 $asset->id,
                 $path,

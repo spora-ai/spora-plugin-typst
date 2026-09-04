@@ -7,6 +7,7 @@ namespace Spora\Plugins\Typst\Http;
 use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Services\PrincipalService;
@@ -46,7 +47,7 @@ abstract class AbstractTypstTextResourceController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException('Authentication required');
         }
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -79,24 +80,12 @@ abstract class AbstractTypstTextResourceController
 
     public function store(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            return $body;
-        }
-        $name    = trim((string) ($body['name'] ?? ''));
-        $content = $body['content'] ?? null;
-
-        if ($name === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'name is required');
-        }
-        if (!is_string($content) || $content === '') {
-            return $this->unprocessable('VALIDATION_ERROR', 'content is required');
-        }
-
         try {
-            $path = $store->write($this->kind(), $name, $content);
+            $store = $this->storeForCurrentUser();
+            $inputs = $this->parseStoreInputs($request);
+            $path = $store->write($this->kind(), $inputs['name'], $inputs['content']);
+        } catch (ResourceValidationFailed $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
         }
@@ -104,14 +93,40 @@ abstract class AbstractTypstTextResourceController
         return new JsonResponse([
             'data' => [
                 $this->singularName() => [
-                    'name'   => $name,
+                    'name'   => $inputs['name'],
                     'kind'   => $this->kind(),
-                    'size'   => strlen($content),
+                    'size'   => strlen($inputs['content']),
                     'path'   => $path,
                     'origin' => 'principal',
                 ],
             ],
         ], Response::HTTP_CREATED);
+    }
+
+    /**
+     * @return array{name: string, content: string}
+     */
+    private function parseStoreInputs(Request $request): array
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new ResourceValidationFailed($body);
+        }
+        $name    = trim((string) ($body['name'] ?? ''));
+        $content = $body['content'] ?? null;
+
+        if ($name === '') {
+            throw new ResourceValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'name is required'),
+            );
+        }
+        if (!is_string($content) || $content === '') {
+            throw new ResourceValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required'),
+            );
+        }
+
+        return ['name' => $name, 'content' => $content];
     }
 
     public function destroy(Request $request): JsonResponse
@@ -130,7 +145,7 @@ abstract class AbstractTypstTextResourceController
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
-            throw new RuntimeException('Authentication required');
+            throw new TypstRuntimeException('Authentication required');
         }
         $principalId = $this->principals->ensureUserPrincipal($userId)->id;
         $paths = new TypstResourcePaths($this->paths(), $principalId);
@@ -151,7 +166,7 @@ abstract class AbstractTypstTextResourceController
         }
         $requestedId = (int) $requested;
         if ($requestedId <= 0 || !in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
-            throw new RuntimeException('Principal not visible to caller');
+            throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
     }
@@ -173,4 +188,19 @@ abstract class AbstractTypstTextResourceController
      * Singular wire key for the upload/show response envelope.
      */
     abstract protected function singularName(): string;
+}
+
+/**
+ * Internal control-flow exception thrown by
+ * {@see AbstractTypstTextResourceController::parseStoreInputs()} to
+ * unwind request parsing without piling up `return $errorResponse`
+ * statements (which Sonar's S1142 counts). Carries the JsonResponse
+ * the public method would otherwise have returned inline.
+ */
+final class ResourceValidationFailed extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('resource validation failed');
+    }
 }
