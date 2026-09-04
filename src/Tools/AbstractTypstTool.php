@@ -8,7 +8,6 @@ use Spora\Models\Agent;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
 use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
-use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalContext;
@@ -32,6 +31,13 @@ use Spora\Tools\AbstractTool;
  *     without the 7-parameter DI chain — the rule is small enough
  *     to inline, and reusing it across tools keeps the visible
  *     behaviour in one place.
+ *   - a {@see \Spora\Core\Paths} factory (`paths()`) — the
+ *     `TypstResourcesTool` needs to build per-call
+ *     {@see \Spora\Plugins\Typst\Services\TypstResourcePaths}
+ *     instances scoped to the call's principal, but `Paths` is a
+ *     stateless value object constructed from `BASE_PATH`; sharing
+ *     the construction keeps the tools in lockstep with the HTTP
+ *     controllers.
  *
  * Subclasses declare their `#[ToolOperation]` set on themselves;
  * `resolveAction()` returns the discriminator value the LLM sent.
@@ -40,8 +46,19 @@ abstract class AbstractTypstTool extends AbstractTool
 {
     public function __construct(
         protected readonly TypstWorldFactory $worldFactory,
-        protected readonly TypstResourceStore $resourceStore,
     ) {}
+
+    /**
+     * Lazily constructs a {@see \Spora\Core\Paths} rooted at the
+     * skeleton's `BASE_PATH`. Mirrors the same construction the HTTP
+     * controllers use (`TypstFontController::paths()`), so the
+     * tool path and the HTTP path agree on `<storage>/typst/`.
+     */
+    protected function paths(): \Spora\Core\Paths
+    {
+        $basePath = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
+        return new \Spora\Core\Paths($basePath);
+    }
 
     protected function resolveAction(array $arguments): string
     {

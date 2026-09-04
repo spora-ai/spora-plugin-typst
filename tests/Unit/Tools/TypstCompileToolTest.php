@@ -7,7 +7,6 @@ use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Services\MediaArchive\DerivativeOutput;
@@ -84,9 +83,6 @@ beforeEach(function () {
     $this->principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
     $this->principalId = $this->principalService->ensureUserPrincipal($this->userId)->id;
 
-    $resourcePaths = new Spora\Plugins\Typst\Services\TypstResourcePaths($paths, principalId: $this->principalId);
-    $this->resourceStore = new TypstResourceStore($resourcePaths);
-
     $this->derivativeService = new MediaDerivativeService(
         new Spora\Services\DataUrlAssetStore(),
         $this->principalService,
@@ -103,7 +99,6 @@ beforeEach(function () {
     };
     $this->tool = new TypstCompileTool(
         $this->worldFactory,
-        $this->resourceStore,
         $this->derivativeService,
         producerResolver: $resolver,
     );
@@ -465,9 +460,7 @@ describe('inspect path', function (): void {
     it('returns success with structured diagnostics on a clean source', function () {
         $tool = new TypstCompileTool(
             $this->worldFactory,
-            $this->resourceStore,
             $this->derivativeService,
-            producerResolver: null,
             inspectorFactory: fn() => new class {
                 public function inspectString(string $source): object
                 {
@@ -523,9 +516,7 @@ describe('inspect path', function (): void {
         };
         $tool = new TypstCompileTool(
             $this->worldFactory,
-            $this->resourceStore,
             $this->derivativeService,
-            producerResolver: null,
             inspectorFactory: fn() => new class ($diag) {
                 private $diag;
                 public function __construct(object $diag)
@@ -572,9 +563,7 @@ describe('inspect path', function (): void {
     it('returns a failed ToolResult when the inspector throws', function () {
         $tool = new TypstCompileTool(
             $this->worldFactory,
-            $this->resourceStore,
             $this->derivativeService,
-            producerResolver: null,
             inspectorFactory: fn() => new class {
                 public function inspectString(string $source): never
                 {

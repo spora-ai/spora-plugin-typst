@@ -10,7 +10,6 @@ use RuntimeException;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -100,7 +99,6 @@ final class TypstCompileTool extends AbstractTypstTool
 {
     public function __construct(
         TypstWorldFactory $worldFactory,
-        TypstResourceStore $resourceStore,
         private readonly MediaDerivativeService $derivativeService,
         private readonly ?Closure $producerResolver = null,
         // Optional inspector seam for tests — when set, returns a
@@ -108,7 +106,7 @@ final class TypstCompileTool extends AbstractTypstTool
         // dependency. Production code uses the world factory's stack.
         private readonly ?Closure $inspectorFactory = null,
     ) {
-        parent::__construct($worldFactory, $resourceStore);
+        parent::__construct($worldFactory);
     }
 
     public function execute(

@@ -3,9 +3,8 @@
 declare(strict_types=1);
 
 use Spora\Core\Paths;
-use Spora\Plugins\Typst\Services\TypstImageStore;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
-use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 
@@ -20,14 +19,15 @@ beforeEach(function () {
     $this->principalService = new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver());
     $this->principalId = $this->principalService->ensureUserPrincipal($this->userId)->id;
 
-    $resourcePaths = new TypstResourcePaths($paths, principalId: $this->principalId);
-    $this->resourceStore = new TypstResourceStore($resourcePaths);
-    $this->imageStore = new TypstImageStore($resourcePaths);
+    // Per-call path resolution — the tool builds its own
+    // `TypstResourcePaths` from `$this->paths()` (which reads
+    // BASE_PATH) and the call's `$context?->principalId`. We mirror
+    // that here so the test's `Paths(sys_get_temp_dir())` matches
+    // the BASE_PATH the tool resolves at runtime.
+    $this->resourcePaths = new TypstResourcePaths($paths, principalId: $this->principalId);
 
     $this->tool = new TypstResourcesTool(
         $this->worldFactory,
-        $this->resourceStore,
-        $this->imageStore,
     );
 
     $this->context = new Spora\Services\PrincipalContext(
@@ -189,5 +189,60 @@ describe('describeAction', function (): void {
         expect($this->tool->describeAction(['action' => 'templates', 'op' => 'write', 'name' => 'doc.typ']))
             ->toContain('templates/write')
             ->toContain('doc.typ');
+    });
+});
+
+describe('principal scope propagation', function (): void {
+    it('honours the principal from the supplied PrincipalContext on each call', function (): void {
+        // Register a second principal — they MUST NOT see the first
+        // principal's resources, even though the tool itself is a
+        // shared singleton. The per-call `TypstResourcePaths`
+        // construction is what enforces the boundary.
+        $userIdB = $this->auth->register('principal-b-' . bin2hex(random_bytes(4)) . '@example.com', 'Password1!', 'Principal B');
+        $principalIdB = $this->principalService->ensureUserPrincipal($userIdB)->id;
+        $contextB = new Spora\Services\PrincipalContext(
+            principalId: $principalIdB,
+            type: 'user',
+            ownerUserId: $userIdB,
+            runnerUserId: $userIdB,
+        );
+
+        $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'write', 'name' => 'private-A.otf', 'content' => 'A-BYTES'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        $principalBList = $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'list'],
+            agentId: 0,
+            userId: $userIdB,
+            context: $contextB,
+        );
+        expect($principalBList->success)->toBeTrue();
+        expect($principalBList->content)->not->toContain('private-A.otf');
+
+        $principalAList = $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'list'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($principalAList->content)->toContain('private-A.otf');
+    });
+
+    it('throws a TypstRuntimeException when called without a PrincipalContext (no principal in scope)', function (): void {
+        // A null context simulates a CLI / background worker path
+        // where the orchestrator hasn't resolved a principal. The
+        // tool must throw — silently returning a "no resources"
+        // ToolResult would mask the wiring bug the original report
+        // surfaced.
+        expect(fn() => $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'list'],
+            agentId: 0,
+            userId: $this->userId,
+            context: null,
+        ))->toThrow(TypstRuntimeException::class);
     });
 });

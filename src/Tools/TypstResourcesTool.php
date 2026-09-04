@@ -92,10 +92,8 @@ final class TypstResourcesTool extends AbstractTypstTool
 {
     public function __construct(
         TypstWorldFactory $worldFactory,
-        TypstResourceStore $resourceStore,
-        private readonly TypstImageStore $imageStore,
     ) {
-        parent::__construct($worldFactory, $resourceStore);
+        parent::__construct($worldFactory);
     }
 
     public function execute(
@@ -115,11 +113,22 @@ final class TypstResourcesTool extends AbstractTypstTool
             ));
         }
 
+        // Build the resource store scoped to *this* call's principal.
+        // The constructor-injected stores were always null-principal
+        // (PHP-DI wires the singleton at boot before any request has
+        // resolved a principal), so the previous incarnation of this
+        // tool would throw on every principal-scoped operation. We
+        // now build a fresh `TypstResourcePaths` per call from the
+        // orchestrator-supplied `PrincipalContext`, mirroring the
+        // per-request `storeForCurrentUser()` pattern the HTTP
+        // controllers use.
+        $paths = new TypstResourcePaths($this->paths(), $context?->principalId);
+
         return match ($action) {
-            'fonts'     => $this->dispatchResource('font', $op, $arguments),
-            'templates' => $this->dispatchResource('template', $op, $arguments),
-            'examples'  => $this->dispatchResource('example', $op, $arguments),
-            'images'    => $this->dispatchImage($op, $arguments),
+            'fonts'     => $this->dispatchResource($paths, 'font', $op, $arguments),
+            'templates' => $this->dispatchResource($paths, 'template', $op, $arguments),
+            'examples'  => $this->dispatchResource($paths, 'example', $op, $arguments),
+            'images'    => $this->dispatchImage($paths, $op, $arguments),
             default     => new ToolResult(false, sprintf(
                 'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images)',
                 $action,
@@ -135,29 +144,29 @@ final class TypstResourcesTool extends AbstractTypstTool
         return sprintf('Typst resources %s/%s%s', $action, $op, $name !== '' ? ':' . $name : '');
     }
 
-    private function dispatchResource(string $kind, string $op, array $arguments): ToolResult
+    private function dispatchResource(TypstResourcePaths $paths, string $kind, string $op, array $arguments): ToolResult
     {
         if ($op === 'list') {
-            return $this->listResources($kind);
+            return $this->listResources($paths, $kind);
         }
         if ($op === 'write') {
-            return $this->writeResource($kind, $arguments);
+            return $this->writeResource($paths, $kind, $arguments);
         }
-        return $this->deleteResource($kind, $arguments);
+        return $this->deleteResource($paths, $kind, $arguments);
     }
 
-    private function dispatchImage(string $op, array $arguments): ToolResult
+    private function dispatchImage(TypstResourcePaths $paths, string $op, array $arguments): ToolResult
     {
         if ($op === 'list') {
-            return $this->listImages();
+            return $this->listImages($paths);
         }
         if ($op === 'write') {
-            return $this->writeImage($arguments);
+            return $this->writeImage($paths, $arguments);
         }
-        return $this->deleteImage($arguments);
+        return $this->deleteImage($paths, $arguments);
     }
 
-    private function listResources(string $kind): ToolResult
+    private function listResources(TypstResourcePaths $paths, string $kind): ToolResult
     {
         try {
             TypstResourcePaths::assertValidKind($kind);
@@ -165,7 +174,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             return new ToolResult(false, $e->getMessage());
         }
 
-        $rows = $this->resourceStore->list($kind);
+        $rows = (new TypstResourceStore($paths))->list($kind);
         if ($rows === []) {
             return new ToolResult(true, sprintf('typst_resources: no %s resources visible', $kind));
         }
@@ -184,7 +193,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         );
     }
 
-    private function writeResource(string $kind, array $arguments): ToolResult
+    private function writeResource(TypstResourcePaths $paths, string $kind, array $arguments): ToolResult
     {
         $name    = (string) ($arguments['name'] ?? '');
         $content = $arguments['content'] ?? null;
@@ -193,7 +202,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         }
         try {
             TypstResourcePaths::assertValidKind($kind);
-            $path = $this->resourceStore->write($kind, $name, $content);
+            $path = (new TypstResourceStore($paths))->write($kind, $name, $content);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
         }
@@ -203,7 +212,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         );
     }
 
-    private function deleteResource(string $kind, array $arguments): ToolResult
+    private function deleteResource(TypstResourcePaths $paths, string $kind, array $arguments): ToolResult
     {
         $name = (string) ($arguments['name'] ?? '');
         if ($name === '') {
@@ -211,7 +220,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         }
         try {
             TypstResourcePaths::assertValidKind($kind);
-            $this->resourceStore->delete($kind, $name);
+            (new TypstResourceStore($paths))->delete($kind, $name);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
         }
@@ -221,9 +230,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         );
     }
 
-    private function listImages(): ToolResult
+    private function listImages(TypstResourcePaths $paths): ToolResult
     {
-        $rows = $this->imageStore->list();
+        $rows = (new TypstImageStore($paths))->list();
         if ($rows === []) {
             return new ToolResult(true, 'typst_resources: no images visible');
         }
@@ -242,7 +251,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         );
     }
 
-    private function writeImage(array $arguments): ToolResult
+    private function writeImage(TypstResourcePaths $paths, array $arguments): ToolResult
     {
         $name    = (string) ($arguments['name'] ?? '');
         $content = $arguments['content'] ?? null;
@@ -250,7 +259,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             return new ToolResult(false, 'typst_resources: `name` and `content` are required for op=write');
         }
         try {
-            $row = $this->imageStore->write($content, 'application/octet-stream', $name);
+            $row = (new TypstImageStore($paths))->write($content, 'application/octet-stream', $name);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
         }
@@ -260,14 +269,14 @@ final class TypstResourcesTool extends AbstractTypstTool
         );
     }
 
-    private function deleteImage(array $arguments): ToolResult
+    private function deleteImage(TypstResourcePaths $paths, array $arguments): ToolResult
     {
         $name = (string) ($arguments['name'] ?? '');
         if ($name === '') {
             return new ToolResult(false, 'typst_resources: `name` is required for op=delete');
         }
         try {
-            $this->imageStore->delete($name);
+            (new TypstImageStore($paths))->delete($name);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
         }
