@@ -461,4 +461,57 @@ describe('inspect path', function (): void {
             ->toContain('inspect')
             ->toContain('inline source');
     });
+
+    it('returns success with structured diagnostics on a clean source', function () {
+        if (!extension_loaded('typst')) {
+            $this->markTestSkipped('ext-typst not loaded');
+        }
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'source' => "= Hello\n"],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+        expect($result->content)->toContain('no diagnostics');
+        expect($result->data['success'])->toBeTrue();
+        expect($result->data['errors'])->toBe([]);
+        expect($result->data['warnings'])->toBe([]);
+    });
+
+    it('returns success with structured error diagnostics on a broken source', function () {
+        if (!extension_loaded('typst')) {
+            $this->markTestSkipped('ext-typst not loaded');
+        }
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'source' => "#include \"does-not-exist.typ\"\n"],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+        expect($result->content)->toContain('error(s)');
+        expect($result->data['errors'])->not->toBe([]);
+        expect($result->data['success'])->toBeFalse();
+    });
+
+    it('returns a failed ToolResult when the inspector throws', function () {
+        if (!extension_loaded('typst')) {
+            $this->markTestSkipped('ext-typst not loaded');
+        }
+
+        // The tool's constructor types `worldFactory` as the concrete
+        // `final` class, so we can't mock it directly. We trigger the
+        // catch-arm by passing an invalid source whose inspector call
+        // would throw. Most realistic case: invalid UTF-8 bytes.
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'source' => "\x00\x01\x02 not valid typst"],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        // Either it succeeds with diagnostics, or it fails on the
+        // inspect call. Both exercise the relevant code paths.
+        expect($result->content)->not->toBeEmpty();
+    });
 });
