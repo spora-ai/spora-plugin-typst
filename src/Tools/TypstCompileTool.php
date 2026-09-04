@@ -9,6 +9,8 @@ use InvalidArgumentException;
 use RuntimeException;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
+use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -198,7 +200,7 @@ final class TypstCompileTool extends AbstractTypstTool
         try {
             $format = strtolower(trim((string) ($arguments['format'] ?? 'pdf')));
             if (!in_array($format, ['pdf', 'png', 'svg'], true)) {
-                throw new InvalidArgumentException(sprintf(
+                throw new TypstInvalidArgumentException(sprintf(
                     'typst_compile: invalid format "%s" (expected: pdf, png, svg)',
                     $format,
                 ));
@@ -207,7 +209,7 @@ final class TypstCompileTool extends AbstractTypstTool
             $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
             $producer = $this->findProducer();
             if ($producer === null) {
-                throw new RuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
+                throw new TypstRuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
             }
             $derivative = $this->producePersistOrThrow(
                 $producer,
@@ -257,9 +259,9 @@ final class TypstCompileTool extends AbstractTypstTool
             if ($e->diagnostics === []) {
                 $lines[] = $e->getMessage();
             }
-            throw new RuntimeException(implode("\n", $lines), 0, $e);
+            throw new TypstRuntimeException(implode("\n", $lines), $e);
         } catch (Throwable $e) {
-            throw new RuntimeException('typst_compile: ' . $e->getMessage(), 0, $e);
+            throw new TypstRuntimeException('typst_compile: ' . $e->getMessage(), $e);
         }
 
         try {
@@ -273,7 +275,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 context: $context,
             );
         } catch (Throwable $e) {
-            throw new RuntimeException('typst_compile: failed to persist derivative: ' . $e->getMessage(), 0, $e);
+            throw new TypstRuntimeException('typst_compile: failed to persist derivative: ' . $e->getMessage(), $e);
         }
     }
 
