@@ -125,7 +125,11 @@ it('POST /typst/compile uses a custom name and stores the parent row with it', f
     expect($asset->payload)->toBe(PLAYGROUND_HELLO_SOURCE);
 });
 
-it('POST /typst/compile overwrites the existing source when called again with the same name', function () {
+it('POST /typst/compile creates a new parent row on each call even with the same filename', function () {
+    // Filename uniqueness is dropped: a second compile with the same
+    // `name` creates a sibling row with a fresh UUID, never
+    // overwrites the existing source in place. The picker surfaces
+    // both rows side-by-side so operators can compare revisions.
     if (!extension_loaded('typst')) {
         $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
@@ -136,7 +140,7 @@ it('POST /typst/compile overwrites the existing source when called again with th
         PLAYGROUND_COMPILE_PATH,
         'POST',
         server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
-        content: json_encode(['source' => '= first', 'name' => 'letter.typ', 'format' => 'pdf']),
+        content: json_encode(['source' => '= first', 'name' => 'playground.typ', 'format' => 'pdf']),
     );
     $firstResp = $this->compileController->compile($firstReq);
     $firstBody = json_decode((string) $firstResp->getContent(), true);
@@ -146,20 +150,19 @@ it('POST /typst/compile overwrites the existing source when called again with th
         PLAYGROUND_COMPILE_PATH,
         'POST',
         server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
-        content: json_encode(['source' => '= second', 'name' => 'letter.typ', 'format' => 'pdf']),
+        content: json_encode(['source' => '= second', 'name' => 'playground.typ', 'format' => 'pdf']),
     );
     $secondResp = $this->compileController->compile($secondReq);
     $secondBody = json_decode((string) $secondResp->getContent(), true);
 
-    // Same parent row, not a new one.
-    expect($secondBody['data']['source_id'])->toBe($firstId);
+    // Two distinct parent rows, not one overwritten row.
+    expect($secondBody['data']['source_id'])->not->toBe($firstId);
 
     $playgroundRows = MediaAsset::query()
         ->where('tool_name', 'typst.playground')
-        ->where('filename', 'letter.typ')
+        ->where('filename', 'playground.typ')
         ->get();
-    expect($playgroundRows)->toHaveCount(1);
-    expect($playgroundRows->first()->payload)->toBe('= second');
+    expect($playgroundRows)->toHaveCount(2);
 });
 
 it('POST /typst/compile appends .typ when the name lacks the suffix', function () {
@@ -399,7 +402,10 @@ it('POST /typst/sources rejects a missing content field with 422', function () {
     expect($body['error']['code'])->toBe('VALIDATION_ERROR');
 });
 
-it('POST /typst/sources returns 409 when a row with the same filename already exists', function () {
+it('POST /typst/sources creates a second row when the filename collides', function () {
+    // Filename uniqueness is dropped: a duplicate filename now
+    // creates a sibling row with a fresh UUID. Both rows are
+    // independently readable via GET /typst/sources/{id}.
     $principalId = (int) $this->principalService->ensureUserPrincipal(
         (int) $this->auth->currentUserId(),
     )->id;
@@ -412,19 +418,26 @@ it('POST /typst/sources returns 409 when a row with the same filename already ex
         content: json_encode(['filename' => 'taken.typ', 'content' => '= new']),
     );
     $resp = $this->sourceController->store($req);
-    expect($resp->getStatusCode())->toBe(409);
+    expect($resp->getStatusCode())->toBe(201);
     $body = json_decode((string) $resp->getContent(), true);
-    expect($body['error']['code'])->toBe('FILENAME_TAKEN');
+    expect($body['data']['id'])->not->toBe('11111111-1111-1111-1111-000000000001');
+    expect($body['data']['filename'])->toBe('taken.typ');
+
+    // Both rows are readable under the same filename.
+    $rows = MediaAsset::query()->where('filename', 'taken.typ')->get();
+    expect($rows)->toHaveCount(2);
 });
 
-it('POST /typst/compile auto-appends .typ to bare names without re-creating the row', function () {
+it('POST /typst/compile auto-appends .typ to bare names and creates a sibling row on the second call', function () {
+    // Mirrors the previous "auto-appends" test but with the new
+    // no-upsert invariant: the second compile produces a fresh
+    // row instead of overwriting the first.
     if (!extension_loaded('typst')) {
         $this->markTestSkipped(PLAYGROUND_SKIP_NO_EXT_TYPST);
     }
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-    // Compile once with "draft" (no .typ) — should be stored as draft.typ.
     $firstReq = Request::create(
         PLAYGROUND_COMPILE_PATH,
         'POST',
@@ -436,8 +449,6 @@ it('POST /typst/compile auto-appends .typ to bare names without re-creating the 
     expect($firstBody['data']['source_name'])->toBe('draft.typ');
     $firstId = $firstBody['data']['source_id'];
 
-    // Compile again with the same bare name — should still resolve to
-    // draft.typ and overwrite the same row.
     $secondReq = Request::create(
         PLAYGROUND_COMPILE_PATH,
         'POST',
@@ -446,7 +457,8 @@ it('POST /typst/compile auto-appends .typ to bare names without re-creating the 
     );
     $secondResp = $this->compileController->compile($secondReq);
     $secondBody = json_decode((string) $secondResp->getContent(), true);
-    expect($secondBody['data']['source_id'])->toBe($firstId);
+    expect($secondBody['data']['source_id'])->not->toBe($firstId);
+    expect($secondBody['data']['source_name'])->toBe('draft.typ');
 });
 
 it('GET /typst/sources?principal_id=N scopes the listing to that principal', function () {
@@ -588,4 +600,47 @@ it('DELETE /typst/sources/{id}?principal_id=N removes the row scoped to that pri
     expect($resp->getStatusCode())->toBe(204);
 
     expect(MediaAsset::query()->find(PLAYGROUND_PRINCIPAL_GROUP_ID))->toBeNull();
+});
+
+it('PUT /typst/sources/{id} on row A does not affect row B with the same filename', function () {
+    // Two rows share a filename under the new no-uniqueness contract.
+    // Editing row A must touch only A; row B's payload, mtime, and
+    // derivatives must be untouched.
+    $userId = (int) $this->auth->currentUserId();
+    $principalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000010', $userId, $principalId, 'dup.typ', '= Original A');
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000011', $userId, $principalId, 'dup.typ', '= Original B');
+
+    $req = Request::create(
+        PLAYGROUND_SOURCES_PATH . '/11111111-1111-1111-1111-000000000010',
+        'PUT',
+        server: ['CONTENT_TYPE' => PLAYGROUND_JSON_MIME],
+        content: json_encode(['content' => '= Edited A']),
+    );
+    $req->attributes->set('id', '11111111-1111-1111-1111-000000000010');
+    $resp = $this->sourceController->update($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $a = MediaAsset::query()->find('11111111-1111-1111-1111-000000000010');
+    $b = MediaAsset::query()->find('11111111-1111-1111-1111-000000000011');
+    expect($a->payload)->toBe('= Edited A');
+    expect($b->payload)->toBe('= Original B');
+});
+
+it('DELETE /typst/sources/{id} of row A leaves row B with the same filename intact', function () {
+    $userId = (int) $this->auth->currentUserId();
+    $principalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000020', $userId, $principalId, 'dup-delete.typ', '= A');
+    seedPlaygroundSource('11111111-1111-1111-1111-000000000021', $userId, $principalId, 'dup-delete.typ', '= B');
+
+    $req = Request::create(
+        PLAYGROUND_SOURCES_PATH . '/11111111-1111-1111-1111-000000000020',
+        'DELETE',
+    );
+    $req->attributes->set('id', '11111111-1111-1111-1111-000000000020');
+    $resp = $this->sourceController->destroy($req);
+    expect($resp->getStatusCode())->toBe(204);
+
+    expect(MediaAsset::query()->find('11111111-1111-1111-1111-000000000020'))->toBeNull();
+    expect(MediaAsset::query()->find('11111111-1111-1111-1111-000000000021'))->not->toBeNull();
 });

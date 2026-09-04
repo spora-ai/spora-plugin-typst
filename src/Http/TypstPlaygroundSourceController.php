@@ -103,11 +103,17 @@ final class TypstPlaygroundSourceController
      *
      * Create a new playground source row WITHOUT compiling. This is
      * the operator-facing counterpart to `compile()`'s side-effect
-     * upsert: the playground UI's "Save" button calls this when the
-     * user has typed source into an unsaved buffer (no parent row
-     * yet) and wants to persist it without paying for a render. The
-     * compile path can still upsert the row in place later — the
-     * natural key `(principal_id, tool_name, filename)` is the same.
+     * materialisation: the playground UI's "Save" button calls this
+     * when the user has typed source into an unsaved buffer (no
+     * parent row yet) and wants to persist it without paying for a
+     * render.
+     *
+     * Filename collisions no longer 409 — every call creates a
+     * fresh row with a new UUID. The previous "second compile
+     * overwrites the source row" behaviour is gone: the playground
+     * UI's editor is opened by id (not filename), so duplicate
+     * filenames are visible side-by-side in the picker rather than
+     * silently stomping each other.
      *
      * Body: { "filename": "letter.typ", "content": "= Hello\n" }
      *
@@ -121,7 +127,6 @@ final class TypstPlaygroundSourceController
             $userId = $this->requireUserId();
             $inputs = $this->parseStoreInputs($request);
             $principalId = $this->resolvePrincipalId($request, $userId);
-            $this->assertFilenameAvailable($principalId, $inputs['filename']);
         } catch (PlaygroundRequestFailed $e) {
             return $e->response;
         }
@@ -167,25 +172,6 @@ final class TypstPlaygroundSourceController
             'filename' => $this->validateFilename($body['filename'] ?? null),
             'content'  => $content,
         ];
-    }
-
-    private function assertFilenameAvailable(int $principalId, string $filename): void
-    {
-        $existing = MediaAsset::query()
-            ->where('principal_id', $principalId)
-            ->where('tool_name', 'typst.playground')
-            ->where('filename', $filename)
-            ->first();
-        if ($existing === null) {
-            return;
-        }
-        throw new PlaygroundRequestFailed(
-            $this->error(
-                'FILENAME_TAKEN',
-                sprintf('A playground source named "%s" already exists. Open it from the file picker to edit it.', $filename),
-                Response::HTTP_CONFLICT,
-            ),
-        );
     }
 
     private function createSourceRow(int $userId, int $principalId, string $filename, string $content): MediaAsset
