@@ -12,6 +12,7 @@ use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
+use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
@@ -210,12 +211,75 @@ final class TypstCompileTool extends AbstractTypstTool
             return new ToolResult(false, 'typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
         }
 
+        $output = $this->produceOrFail($producer, $resolved['parent'], $format, $arguments);
+        if ($output instanceof ToolResult) {
+            return $output;
+        }
+
+        $derivative = $this->persistDerivativeOrFail(
+            $producer,
+            $resolved['parent'],
+            $output,
+            $format,
+            $userId,
+            $context,
+        );
+        if ($derivative instanceof ToolResult) {
+            return $derivative;
+        }
+
+        return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format);
+    }
+
+    /**
+     * Run {@see MediaDerivativeService::create()} and translate the
+     * failure into a {@see ToolResult}. Returns the new {@see MediaAsset}
+     * on success.
+     *
+     * @return MediaAsset|ToolResult
+     */
+    private function persistDerivativeOrFail(
+        MediaDerivativeProducerInterface $producer,
+        MediaAsset $parent,
+        DerivativeOutput $output,
+        string $format,
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): MediaAsset|ToolResult {
+        try {
+            return $this->derivativeService->create(
+                parent: $parent,
+                output: $output,
+                format: $format,
+                producerPlugin: $producer->pluginSlug(),
+                producerOperation: $producer->operationName(),
+                userId: $userId,
+                context: $context,
+            );
+        } catch (Throwable $e) {
+            return new ToolResult(false, 'typst_compile: failed to persist derivative: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * Run the producer and translate compile / generic failures into
+     * a {@see ToolResult} when the produce call throws. Returns the
+     * {@see DerivativeOutput} on success.
+     *
+     * @return DerivativeOutput|ToolResult
+     */
+    private function produceOrFail(
+        MediaDerivativeProducerInterface $producer,
+        MediaAsset $parent,
+        string $format,
+        array $arguments,
+    ): DerivativeOutput|ToolResult {
         $page = isset($arguments['page']) ? max(0, (int) $arguments['page']) : null;
         $dpi  = isset($arguments['dpi']) ? max(36.0, min(600.0, (float) $arguments['dpi'])) : null;
 
         try {
-            $output = $producer->produce(
-                source: $resolved['parent'],
+            return $producer->produce(
+                source: $parent,
                 format: $format,
                 options: array_filter([
                     'page' => $page,
@@ -234,49 +298,6 @@ final class TypstCompileTool extends AbstractTypstTool
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_compile: ' . $e->getMessage());
         }
-
-        try {
-            $derivative = $this->derivativeService->create(
-                parent: $resolved['parent'],
-                output: $output,
-                format: $format,
-                producerPlugin: $producer->pluginSlug(),
-                producerOperation: $producer->operationName(),
-                userId: $userId,
-                context: $context,
-            );
-        } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_compile: failed to persist derivative: ' . $e->getMessage());
-        }
-
-        $url = $derivative->asset_url;
-        $alt = sprintf('Typst %s render of %s', strtoupper($format), $resolved['parent']->filename ?? $resolved['parent']->id);
-
-        if ($format === 'pdf') {
-            // PDFs aren't image-embedable in the chat sanitizer; pair
-            // the link with a first-page PNG preview so the user sees
-            // the result inline. The PNG is produced via the same
-            // producer path and persisted as a sibling derivative.
-            $previewUrl = $this->firstPagePngUrl($resolved['parent'], $derivative->id);
-            $content = $previewUrl !== ''
-                ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
-                : sprintf("[Open PDF](%s)", $url);
-        } else {
-            $content = sprintf('![%s](%s)', $alt, $url);
-        }
-
-        return ToolResult::ok(
-            content: $content,
-            data: [
-                'derivative_id' => $derivative->id,
-                'asset_url'     => $url,
-                'format'        => $format,
-                'mime'          => $derivative->mime_type,
-                'size'          => $derivative->byte_size,
-                'width'         => $derivative->width,
-                'height'        => $derivative->height,
-            ],
-        );
     }
 
     private function findProducer(): ?MediaDerivativeProducerInterface
@@ -293,12 +314,58 @@ final class TypstCompileTool extends AbstractTypstTool
     }
 
     /**
-     * When the requested format is PDF, render the first page as PNG
-     * alongside it so the chat UI's `MediaEmbed` shows a preview.
-     * The PNG is stored as a separate derivative under the same
-     * parent so it shows up in the Versions UI too.
+     * Build the success {@see ToolResult} for a successful render.
+     * For PDF outputs, attaches a first-page PNG preview URL so the
+     * chat UI's `MediaEmbed` can render the document inline; for
+     * other formats the asset URL is enough.
      */
-    private function firstPagePngUrl(MediaAsset $parent, string $derivativeId): string
+    private function buildSuccessToolResult(
+        MediaAsset $derivative,
+        MediaAsset $parent,
+        string $format,
+    ): ToolResult {
+        $url = $derivative->asset_url;
+        $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
+
+        $content = $format === 'pdf'
+            ? $this->pdfRenderContent($url, $alt, $parent)
+            : sprintf('![%s](%s)', $alt, $url);
+
+        return ToolResult::ok(
+            content: $content,
+            data: [
+                'derivative_id' => $derivative->id,
+                'asset_url'     => $url,
+                'format'        => $format,
+                'mime'          => $derivative->mime_type,
+                'size'          => $derivative->byte_size,
+                'width'         => $derivative->width,
+                'height'        => $derivative->height,
+            ],
+        );
+    }
+
+    /**
+     * PDFs aren't image-embedable in the chat sanitizer; pair the
+     * link with a first-page PNG preview so the user sees the result
+     * inline. The PNG is produced via the same producer path and
+     * persisted as a sibling derivative.
+     */
+    private function pdfRenderContent(string $url, string $alt, MediaAsset $parent): string
+    {
+        $previewUrl = $this->firstPagePngUrl($parent);
+        return $previewUrl !== ''
+            ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
+            : sprintf("[Open PDF](%s)", $url);
+    }
+
+    /**
+     * Render a first-page PNG sibling so the chat UI's `MediaEmbed`
+     * shows a preview. Returns the preview asset URL or empty string
+     * when the producer or persistence path fails — the parent
+     * render still succeeds; the preview is best-effort.
+     */
+    private function firstPagePngUrl(MediaAsset $parent): string
     {
         $producer = $this->findProducer();
         if ($producer === null) {

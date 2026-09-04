@@ -65,9 +65,11 @@ final class TypstDiagnosticFormatter
             '<path>',
             $message,
         ) ?? $message;
-        // Windows-style absolute paths.
+        // Windows-style absolute paths. Match `X:\` plus at least one
+        // path component, plus one more to confirm it's a real absolute
+        // path (not `C:\foo` as a bare drive-letter shortcut).
         $message = preg_replace(
-            '#([A-Za-z]:\\[A-Za-z0-9._-]+){2,}#',
+            '#([A-Za-z]:(\\\\[A-Za-z0-9._-]+){2,})#',
             '<path>',
             $message,
         ) ?? $message;
