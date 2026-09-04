@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Http;
 
+use Closure;
 use InvalidArgumentException;
 use LogicException;
 use RuntimeException;
@@ -15,6 +16,7 @@ use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
 use Spora\Services\MediaArchive\MediaType;
 use Spora\Services\PrincipalContext;
@@ -76,6 +78,8 @@ final class TypstCompileController
         private readonly PrincipalService $principals,
         private readonly MediaDerivativeService $derivativeService,
         private readonly TypstWorldFactory $worldFactory,
+        /** Optional closure returning a pre-built producer. Used by tests to skip the ext-typst dependency. */
+        private readonly ?Closure $producerFactory = null,
     ) {}
 
     /**
@@ -164,7 +168,7 @@ final class TypstCompileController
      * one on error, one on success.
      */
     private function runCompile(
-        TypstRenderProducer $producer,
+        MediaDerivativeProducerInterface $producer,
         CompileInputs $inputs,
         PrincipalContext $context,
         int $userId,
@@ -198,7 +202,7 @@ final class TypstCompileController
         }
     }
 
-    private function safeProduce(TypstRenderProducer $producer, MediaAsset $parent, CompileInputs $inputs): mixed
+    private function safeProduce(MediaDerivativeProducerInterface $producer, MediaAsset $parent, CompileInputs $inputs): mixed
     {
         try {
             return $producer->produce(
@@ -215,7 +219,7 @@ final class TypstCompileController
     }
 
     private function safePersistDerivative(
-        TypstRenderProducer $producer,
+        MediaDerivativeProducerInterface $producer,
         MediaAsset $parent,
         mixed $output,
         string $format,
@@ -321,8 +325,11 @@ final class TypstCompileController
         return $payload;
     }
 
-    private function findProducer(): ?TypstRenderProducer
+    private function findProducer(): ?MediaDerivativeProducerInterface
     {
+        if ($this->producerFactory !== null) {
+            return ($this->producerFactory)();
+        }
         foreach (MediaDerivativeProducerDiscovery::all() as $class) {
             if ($class === TypstRenderProducer::class) {
                 return new $class($this->worldFactory);
