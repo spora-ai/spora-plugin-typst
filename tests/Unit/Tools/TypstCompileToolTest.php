@@ -463,10 +463,33 @@ describe('inspect path', function (): void {
     });
 
     it('returns success with structured diagnostics on a clean source', function () {
-        if (!extension_loaded('typst')) {
-            $this->markTestSkipped('ext-typst not loaded');
-        }
-        $result = $this->tool->execute(
+        $tool = new TypstCompileTool(
+            $this->worldFactory,
+            $this->resourceStore,
+            $this->derivativeService,
+            producerResolver: null,
+            inspectorFactory: fn() => new class {
+                public function inspectString(string $source): object
+                {
+                    return new class {
+                        public function errors(): array
+                        {
+                            return [];
+                        }
+                        public function warnings(): array
+                        {
+                            return [];
+                        }
+                        public function success(): bool
+                        {
+                            return true;
+                        }
+                    };
+                }
+            },
+        );
+
+        $result = $tool->execute(
             ['action' => 'inspect', 'source' => "= Hello\n"],
             agentId: 0,
             userId: $this->userId,
@@ -480,38 +503,94 @@ describe('inspect path', function (): void {
     });
 
     it('returns success with structured error diagnostics on a broken source', function () {
-        if (!extension_loaded('typst')) {
-            $this->markTestSkipped('ext-typst not loaded');
-        }
-        $result = $this->tool->execute(
+        // Stand-in diagnostic that satisfies the tool's call to
+        // $diag->message() / $diag->severity() / $diag->hints().
+        $diag = new class {
+            public function severity(): object
+            {
+                return new class {
+                    public string $name = 'ERROR';
+                };
+            }
+            public function message(): string
+            {
+                return 'file not found (searched at /etc/passwd)';
+            }
+            public function hints(): array
+            {
+                return [];
+            }
+        };
+        $tool = new TypstCompileTool(
+            $this->worldFactory,
+            $this->resourceStore,
+            $this->derivativeService,
+            producerResolver: null,
+            inspectorFactory: fn() => new class ($diag) {
+                private $diag;
+                public function __construct(object $diag)
+                {
+                    $this->diag = $diag;
+                }
+                public function inspectString(string $source): object
+                {
+                    return new class ($this->diag) {
+                        private $diag;
+                        public function __construct(object $diag)
+                        {
+                            $this->diag = $diag;
+                        }
+                        public function errors(): array
+                        {
+                            return [$this->diag];
+                        }
+                        public function warnings(): array
+                        {
+                            return [];
+                        }
+                        public function success(): bool
+                        {
+                            return false;
+                        }
+                    };
+                }
+            },
+        );
+
+        $result = $tool->execute(
             ['action' => 'inspect', 'source' => "#include \"does-not-exist.typ\"\n"],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
-        expect($result->content)->toContain('error(s)');
+        expect($result->content)->toContain('1 error(s)');
         expect($result->data['errors'])->not->toBe([]);
         expect($result->data['success'])->toBeFalse();
     });
 
     it('returns a failed ToolResult when the inspector throws', function () {
-        if (!extension_loaded('typst')) {
-            $this->markTestSkipped('ext-typst not loaded');
-        }
+        $tool = new TypstCompileTool(
+            $this->worldFactory,
+            $this->resourceStore,
+            $this->derivativeService,
+            producerResolver: null,
+            inspectorFactory: fn() => new class {
+                public function inspectString(string $source): never
+                {
+                    throw new RuntimeException('inspector exploded');
+                }
+            },
+        );
 
-        // The tool's constructor types `worldFactory` as the concrete
-        // `final` class, so we can't mock it directly. We trigger the
-        // catch-arm by passing an invalid source whose inspector call
-        // would throw. Most realistic case: invalid UTF-8 bytes.
-        $result = $this->tool->execute(
-            ['action' => 'inspect', 'source' => "\x00\x01\x02 not valid typst"],
+        $result = $tool->execute(
+            ['action' => 'inspect', 'source' => "= Hi\n"],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
         );
-        // Either it succeeds with diagnostics, or it fails on the
-        // inspect call. Both exercise the relevant code paths.
-        expect($result->content)->not->toBeEmpty();
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('inspect failed');
+        expect($result->content)->toContain('inspector exploded');
     });
 });

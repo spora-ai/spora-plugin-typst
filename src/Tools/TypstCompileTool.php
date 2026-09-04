@@ -103,6 +103,10 @@ final class TypstCompileTool extends AbstractTypstTool
         TypstResourceStore $resourceStore,
         private readonly MediaDerivativeService $derivativeService,
         private readonly ?Closure $producerResolver = null,
+        // Optional inspector seam for tests — when set, returns a
+        // `\Typst\Inspector` shaped like ext-typst's without the C++
+        // dependency. Production code uses the world factory's stack.
+        private readonly ?Closure $inspectorFactory = null,
     ) {
         parent::__construct($worldFactory, $resourceStore);
     }
@@ -146,8 +150,10 @@ final class TypstCompileTool extends AbstractTypstTool
         }
 
         try {
-            $stack = $this->worldFactory->build($context?->principalId);
-            $result = $stack['inspector']->inspectString($resolved['bytes']);
+            $inspector = $this->inspectorFactory !== null
+                ? ($this->inspectorFactory)()
+                : $this->worldFactory->build($context?->principalId)['inspector'];
+            $result = $inspector->inspectString($resolved['bytes']);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_compile: inspect failed: ' . $e->getMessage());
         }
@@ -392,7 +398,7 @@ final class TypstCompileTool extends AbstractTypstTool
         return $pngDerivative->asset_url;
     }
 
-    private function renderDiagnostic(string $label, \Typst\Diagnostic\Diagnostic $d): string
+    private function renderDiagnostic(string $label, object $d): string
     {
         $hints = $d->hints();
         $hintSuffix = $hints !== [] ? "\n    hint: " . implode(' / ', array_map('strval', $hints)) : '';
