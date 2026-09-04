@@ -45,8 +45,9 @@ For routine compiles, the flow is `typst_compile(action: "inspect")` → fix →
 `typst_compile` accepts the source in one of two ways (for both `render` and `inspect`):
 
 ```jsonc
-// inline — small, ephemeral, freshly authored
-{ "source": "= Hello\n", "format": "pdf" }
+// inline — small, ephemeral, freshly authored (render needs a `filename`)
+// filename becomes the playground pool row name; .typ is auto-appended
+{ "source": "= Hello\n", "filename": "letter.typ", "format": "pdf" }
 
 // file — a media asset id previously uploaded as .typ
 { "file": "01HXYZ...", "format": "png", "page": 0 }
@@ -58,7 +59,9 @@ Default to inline. Switch to `file` when:
 - The source is bigger than ~4 KB (paste limit).
 - You want the natural-key idempotency of `media_derivatives` (re-rendering the same `file` with the same `format` refreshes the existing row instead of stacking duplicates).
 
-Inline sources are stored as transient `text/x-typst` parent rows so the derivative has a `parent_id` to attach to. The parent row carries the source bytes in `data_url` mode and is invisible to the media library's LIST endpoint (it's marked `plugin_slug='spora-plugin-typst'`, `tool_name='typst.render'`).
+`filename` is **required** when `action="render"` is called with inline `source`. Pick a basename the user can recognise in the playground picker — `"letter.typ"`, `"cover-letter.typ"`, `"playground.typ"`. Without it the render is rejected with a clear error: every inline render must produce a named row, otherwise the parent becomes invisible in the file picker and accumulates as an orphan. Two renders with the same `filename` produce sibling rows (the previous in-place overwrite behaviour is gone) so the user can compare revisions; the file picker surfaces both.
+
+`inspect` never persists. It runs `inspectString($bytes)` only and returns the structured diagnostics; no `MediaAsset` row is written, so an inspect call cannot leave orphan rows. A `filename` on an inspect call is ignored — `filename` is render-only.
 
 ## Format choice
 

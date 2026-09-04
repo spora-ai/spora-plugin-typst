@@ -87,11 +87,18 @@ The plugin's test suite has two parts:
 
 `typst_compile` accepts the source as either:
 
-- `source` (inline UTF-8 Typst source) — persisted as a transient
-  `text/x-typst` parent row.
+- `source` (inline UTF-8 Typst source) — required when used:
+  `filename` (the playground pool row name; `.typ` is auto-appended).
+  The parent row always lives in `tool_name='typst.playground'`, so
+  it surfaces in the file picker; filename collisions create a
+  sibling row rather than overwriting the existing source.
 - `file` (a previously-uploaded `.typ` media asset id) — renders the
   parent bytes. Re-rendering the same `(file, format)` pair refreshes the
-  existing derivative row.
+  existing derivative row. `filename` is ignored on this path.
+
+`inspect` never persists: it runs `inspectString($bytes)` only and
+returns the structured diagnostics. No `MediaAsset` row is written,
+so an inspect call cannot leave orphan rows in the playground pool.
 
 ## REST surface
 
@@ -153,13 +160,22 @@ SVG. The compile flow is exposed as:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, format, page, dpi }`) |
+| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, name, format, page, dpi }`) |
 
 The endpoint mirrors `TypstCompileTool`'s `action: "render"` path: it
-materialises an inline `text/x-typst` parent row so the natural-key on
-`media_derivatives` is well-defined, runs the same `TypstRenderProducer`,
-persists through `MediaDerivativeService::create()`, and returns the
-canonical asset URL.
+materialises an inline `text/x-typst` parent row in the playground
+pool (so the natural-key on `media_derivatives` is well-defined),
+runs the same `TypstRenderProducer`, persists through
+`MediaDerivativeService::create()`, and returns the canonical asset
+URL.
+
+The `name` field is **required** for inline `source` — the LLM must
+pick a playground row name (`.typ` is auto-appended). Two compiles
+with the same `name` produce sibling rows with distinct UUIDs; the
+file picker surfaces both. Re-rendering the same parent refreshes
+derivatives in place via the `(parent_id, format, ...)` natural key,
+so no idempotency is lost. The `name` field is ignored when `file`
+is supplied.
 For PDF it also produces a first-page PNG sibling so the UI can render
 an inline preview without a second round-trip.
 
@@ -241,15 +257,17 @@ plugin loader automatically.
 │   ├── Exceptions/
 │   │   └── TypstCompilationException.php
 │   ├── Http/
-│   │   ├── TypstFontController.php    # GET/POST/DELETE /api/v1/typst/fonts
-│   │   ├── TypstExampleController.php # GET/POST/DELETE /api/v1/typst/examples
-│   │   ├── TypstImageController.php   # GET/POST/DELETE /api/v1/typst/images
-│   │   └── TypstCompileController.php # POST /api/v1/typst/compile
+│   │   ├── TypstFontController.php             # GET/POST/DELETE /api/v1/typst/fonts
+│   │   ├── TypstExampleController.php          # GET/POST/DELETE /api/v1/typst/examples
+│   │   ├── TypstImageController.php            # GET/POST/DELETE /api/v1/typst/images
+│   │   ├── TypstCompileController.php          # POST /api/v1/typst/compile
+│   │   └── TypstPlaygroundSourceController.php # CRUD /api/v1/typst/sources
 │   ├── Producers/
 │   │   └── TypstRenderProducer.php    # MediaDerivativeProducerInterface impl
 │   ├── Services/
 │   │   ├── TypstResourcePaths.php     # tier-1 + tier-2 path resolution
 │   │   ├── TypstResourceStore.php     # list/read/write/delete for tier-2
+│   │   ├── TypstFilename.php          # shared basename validator (tool + controllers)
 │   │   └── TypstWorldFactory.php      # builds Typst\World + Compiler + Inspector
 │   └── Tools/
 │       ├── AbstractTypstTool.php      # shared source-resolution + visibility
