@@ -152,7 +152,12 @@ final class TypstCompileTool extends AbstractTypstTool
             $inspector = $this->inspectorFactory !== null
                 ? ($this->inspectorFactory)()
                 : $this->worldFactory->build($context?->principalId)['inspector'];
-            $result = $inspector->inspectString($resolved['bytes']);
+            // Mirror the producer's wrap so the inspector's
+            // font-discovery sees the same defaults — otherwise
+            // "no font could be found" surfaces in inspect but
+            // disappears in render.
+            $wrapped = $this->worldFactory->wrapSource($resolved['bytes']);
+            $result = $inspector->inspectString($wrapped);
         } catch (Throwable $e) {
             return new ToolResult(false, 'typst_compile: inspect failed: ' . $e->getMessage());
         }

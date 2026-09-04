@@ -126,11 +126,18 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         $principalId = $source->principal_id !== null ? (int) $source->principal_id : null;
         $stack = $this->worldFactory->build($principalId);
 
+        // Wrap with the factory's prelude so a document without an
+        // explicit `#set text(font: …)` still renders — and a math
+        // block without `#show math.equation: set text(font: …)`
+        // doesn't trip ext-typst's "no font could be found" error.
+        // The user's own set/show rules later in the file override.
+        $wrapped = $this->worldFactory->wrapSource($sourceBytes);
+
         // Diagnostics-first: refuse to render when the inspector
         // reports errors. The producer is otherwise silent on
         // warnings — they're surfaced in the tool layer's
         // ToolResult content so the LLM can decide what to do.
-        $inspection = $stack['inspector']->inspectString($sourceBytes);
+        $inspection = $stack['inspector']->inspectString($wrapped);
         if (!$inspection->success() || $inspection->hasErrors()) {
             throw new TypstCompilationException(
                 $this->summariseDiagnostics($inspection->errors()),
@@ -139,7 +146,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         }
 
         try {
-            $document = $stack['compiler']->compileString($sourceBytes);
+            $document = $stack['compiler']->compileString($wrapped);
         } catch (Throwable $e) {
             throw new TypstCompilationException(
                 sprintf('TypstRenderProducer: compile failed: %s', $e->getMessage()),

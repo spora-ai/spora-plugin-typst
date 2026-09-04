@@ -149,6 +149,41 @@ final class TypstWorldFactory
     }
 
     /**
+     * Typst snippet prepended to every compile/inspect so documents
+     * that don't declare a font — and especially those that don't
+     * declare a math font — still render. ext-typst's auto-discovery
+     * picks a text font from `font_dirs` for plain paragraphs but
+     * cannot find a math font automatically when `$...$` appears,
+     * so without this prelude a document with a math block aborts
+     * with "no font could be found" even though `latinmodern-math.otf`
+     * is sitting in the skill-shipped fonts dir.
+     *
+     * The rules are scoped to the file: any `#set text(font: …)` or
+     * `#show math.equation: set text(font: …)` the document itself
+     * declares AFTER the prelude overrides these defaults, so
+     * per-document font choice still wins.
+     *
+     * @return string
+     */
+    public function prelude(): string
+    {
+        return "#set text(font: (\"Inter\", \"DejaVu Sans\", \"DejaVu Serif\"), lang: \"en\")\n"
+            . "#show math.equation: set text(font: (\"Latin Modern Math\", \"DejaVu Sans\"))\n";
+    }
+
+    /**
+     * Wrap user-authored source with {@see prelude()} so documents
+     * without an explicit font or math-font still render. The
+     * user's own set/show rules later in the file override these
+     * defaults — the prelude only fills the gap when the document
+     * is silent.
+     */
+    public function wrapSource(string $source): string
+    {
+        return $this->prelude() . $source;
+    }
+
+    /**
      * Template dir is the principal's per-principal root. Both
      * `templates/` and `examples/` live under it, and images are
      * stored directly under it (no `images/` subdir) so

@@ -9,6 +9,7 @@ use Spora\Core\MiddlewareRouteCollector;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
+use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
@@ -18,6 +19,7 @@ use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
+use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 
 /**
@@ -96,6 +98,13 @@ final class TypstPlugin extends AbstractPlugin
         // Idempotent — `MediaDerivativeProducerDiscovery::add()` no-ops
         // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
+
+        // Register the `.typ` text passthrough so a `.typ` upload is
+        // accepted by the upload allowlist (`text/x-typst` is not in
+        // core's static TEXT_MIME_TYPES; the converter-supplied branch
+        // of `MediaAllowedTypesService` pulls it in). Mirrors how the
+        // PDF converter makes `application/pdf` uploadable.
+        MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
     /**

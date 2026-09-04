@@ -457,6 +457,56 @@ describe('inspect path', function (): void {
             ->toContain('inline source');
     });
 
+    it('wraps the inspector input with the prelude so it sees the same font defaults as the producer', function () {
+        // The inspector is called with the raw source; if it
+        // weren't wrapped, a math source without an explicit
+        // math-font declaration would surface "no font could be
+        // found" here but disappear on the render path. This
+        // fixture captures the source the inspector sees so a
+        // future refactor can't quietly drop the wrap.
+        $inspector = new class {
+            /** @var array<int, string> */
+            public array $recorded = [];
+
+            public function inspectString(string $source): object
+            {
+                $this->recorded[] = $source;
+                return new class {
+                    public function errors(): array
+                    {
+                        return [];
+                    }
+                    public function warnings(): array
+                    {
+                        return [];
+                    }
+                    public function success(): bool
+                    {
+                        return true;
+                    }
+                };
+            }
+        };
+        $tool = new TypstCompileTool(
+            $this->worldFactory,
+            $this->derivativeService,
+            inspectorFactory: static fn() => $inspector,
+        );
+
+        $result = $tool->execute(
+            ['action' => 'inspect', 'source' => '= Hello'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+        expect($inspector->recorded)->toHaveCount(1);
+        $captured = $inspector->recorded[0];
+        expect($captured)->toStartWith('#set text(font:');
+        expect($captured)->toContain('Latin Modern Math');
+        expect(substr($captured, -strlen('= Hello')))->toBe('= Hello');
+    });
+
     it('returns success with structured diagnostics on a clean source', function () {
         $tool = new TypstCompileTool(
             $this->worldFactory,
