@@ -85,6 +85,12 @@ use Throwable;
     required: false,
 )]
 #[ToolParameter(
+    name: 'filename',
+    type: 'string',
+    description: 'Basename for the playground parent row when rendering inline `source` (a name like "letter.typ"; `.typ` is auto-appended). Ignored when `file` is supplied; required only when rendering with inline `source` (the row becomes invisible in the playground picker without it).',
+    required: ['render'],
+)]
+#[ToolParameter(
     name: 'page',
     type: 'integer',
     description: 'Page number to render for png/svg (0-indexed; default 0). Ignored when action=inspect or format=pdf.',
@@ -132,7 +138,7 @@ final class TypstCompileTool extends AbstractTypstTool
     public function describeAction(array $arguments): string
     {
         $action = $this->resolveAction($arguments);
-        $what   = isset($arguments['file']) ? 'file=' . substr((string) $arguments['file'], 0, 8) : 'inline source';
+        $what = $this->describeSource($arguments);
         if ($action === 'inspect') {
             return sprintf('Typst inspect (%s)', $what);
         }
@@ -140,10 +146,30 @@ final class TypstCompileTool extends AbstractTypstTool
         return sprintf('Typst render → %s (%s)', $format, $what);
     }
 
+    /**
+     * Build the source descriptor shown in {@see describeAction()}.
+     * For `file=<id>` shows the file prefix; for inline `source`
+     * shows the supplied `filename` when one is given (so the
+     * approval UI surfaces the row name the LLM picked), or the
+     * literal "inline" when no filename is supplied.
+     */
+    private function describeSource(array $arguments): string
+    {
+        if (isset($arguments['file']) && is_string($arguments['file']) && $arguments['file'] !== '') {
+            return 'file=' . substr($arguments['file'], 0, 8);
+        }
+        $rawName = $arguments['filename'] ?? null;
+        if (is_string($rawName) && $rawName !== '') {
+            $name = trim($rawName);
+            return $name === '' ? 'inline' : $name;
+        }
+        return 'inline';
+    }
+
     private function inspectSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         try {
-            $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
+            $resolved = $this->resolveSourceBytes($arguments, $context, $userId);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
@@ -206,7 +232,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 ));
             }
 
-            $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
+            $resolved = $this->resolveSourceForRender($arguments, $agentId, $userId, $context);
             $producer = $this->findProducer();
             if ($producer === null) {
                 throw new TypstRuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
