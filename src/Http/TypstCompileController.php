@@ -12,7 +12,9 @@ use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
+use Spora\Plugins\Typst\Services\TypstFilename;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -361,40 +363,23 @@ final class TypstCompileController
      * missing. Rejects anything that would escape the principal's
      * directory (path traversal, control chars, NUL bytes).
      *
+     * The actual regex / length rule lives in
+     * {@see TypstFilename::sanitise()} so this controller, the
+     * playground source controller, and the `typst_compile` tool
+     * share one definition.
+     *
      * Throws {@see CompileInputValidation} on rejection so this
      * method stays within Sonar's S1142 budget (≤ 3 returns).
      */
     private function validateName(mixed $raw): string
     {
-        if ($raw === null || $raw === '') {
-            return self::DEFAULT_NAME;
-        }
-        if (!is_string($raw)) {
+        try {
+            return TypstFilename::sanitise($raw, self::DEFAULT_NAME);
+        } catch (TypstInvalidArgumentException $e) {
             throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', 'name must be a string'),
+                $this->unprocessable('VALIDATION_ERROR', $e->getMessage()),
             );
         }
-        $trimmed = trim($raw);
-        if ($trimmed === '') {
-            return self::DEFAULT_NAME;
-        }
-        if (preg_match('/[\x00-\x1f\x7f\/\\\\]/', $trimmed) === 1) {
-            throw new CompileInputValidation(
-                $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'name contains illegal characters (no path separators or control bytes)',
-                ),
-            );
-        }
-        if (strlen($trimmed) > 128) {
-            throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', 'name is too long (max 128 chars)'),
-            );
-        }
-        if (!str_ends_with($trimmed, '.typ')) {
-            $trimmed .= '.typ';
-        }
-        return $trimmed;
     }
 
     /**

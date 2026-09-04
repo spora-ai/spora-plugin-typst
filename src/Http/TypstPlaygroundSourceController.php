@@ -9,7 +9,9 @@ use RuntimeException;
 use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
 use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
+use Spora\Plugins\Typst\Services\TypstFilename;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -371,46 +373,24 @@ final class TypstPlaygroundSourceController
 
     /**
      * Validate the playground filename for the create / store path.
-     * Mirrors {@see TypstCompileController::validateName()} so the
-     * two endpoints accept the same shape (a plain basename, or a
-     * basename with `.typ` auto-appended). Rejects path separators,
-     * control bytes, and over-long names with a 422. Returns the
-     * validated name (with `.typ` appended when missing) on success.
+     * Delegates to {@see TypstFilename::sanitise()} so this controller,
+     * {@see TypstCompileController::validateName()}, and the
+     * `typst_compile` tool all share one definition of what counts
+     * as a valid basename. Rejects path separators, control bytes,
+     * and over-long names with a 422; auto-appends `.typ` when missing.
      *
      * Throws {@see PlaygroundRequestFailed} on rejection so the caller
      * stays within Sonar's S1142 budget.
      */
     private function validateFilename(mixed $raw): string
     {
-        if ($raw === null || $raw === '') {
-            return self::DEFAULT_FILENAME;
-        }
-        if (!is_string($raw)) {
+        try {
+            return TypstFilename::sanitise($raw, self::DEFAULT_FILENAME);
+        } catch (TypstInvalidArgumentException $e) {
             throw new PlaygroundRequestFailed(
-                $this->unprocessable('VALIDATION_ERROR', 'filename must be a string'),
+                $this->unprocessable('VALIDATION_ERROR', $e->getMessage()),
             );
         }
-        $trimmed = trim($raw);
-        if ($trimmed === '') {
-            return self::DEFAULT_FILENAME;
-        }
-        if (preg_match('/[\x00-\x1f\x7f\/\\\\]/', $trimmed) === 1) {
-            throw new PlaygroundRequestFailed(
-                $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'filename contains illegal characters (no path separators or control bytes)',
-                ),
-            );
-        }
-        if (strlen($trimmed) > 128) {
-            throw new PlaygroundRequestFailed(
-                $this->unprocessable('VALIDATION_ERROR', 'filename is too long (max 128 chars)'),
-            );
-        }
-        if (!str_ends_with($trimmed, '.typ')) {
-            $trimmed .= '.typ';
-        }
-        return $trimmed;
     }
 
     /**
