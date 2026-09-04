@@ -11,7 +11,6 @@ use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
-use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
@@ -196,93 +195,53 @@ final class TypstCompileTool extends AbstractTypstTool
 
     private function renderSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
     {
-        $format = strtolower(trim((string) ($arguments['format'] ?? 'pdf')));
-        if (!in_array($format, ['pdf', 'png', 'svg'], true)) {
-            return new ToolResult(false, sprintf(
-                'typst_compile: invalid format "%s" (expected: pdf, png, svg)',
-                $format,
-            ));
-        }
-
         try {
+            $format = strtolower(trim((string) ($arguments['format'] ?? 'pdf')));
+            if (!in_array($format, ['pdf', 'png', 'svg'], true)) {
+                throw new InvalidArgumentException(sprintf(
+                    'typst_compile: invalid format "%s" (expected: pdf, png, svg)',
+                    $format,
+                ));
+            }
+
             $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
+            $producer = $this->findProducer();
+            if ($producer === null) {
+                throw new RuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
+            }
+            $derivative = $this->producePersistOrThrow(
+                $producer,
+                $resolved['parent'],
+                $format,
+                $arguments,
+                $userId,
+                $context,
+            );
+            return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
-
-        $producer = $this->findProducer();
-        if ($producer === null) {
-            return new ToolResult(false, 'typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
-        }
-
-        $output = $this->produceOrFail($producer, $resolved['parent'], $format, $arguments);
-        if ($output instanceof ToolResult) {
-            return $output;
-        }
-
-        $derivative = $this->persistDerivativeOrFail(
-            $producer,
-            $resolved['parent'],
-            $output,
-            $format,
-            $userId,
-            $context,
-        );
-        if ($derivative instanceof ToolResult) {
-            return $derivative;
-        }
-
-        return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format);
     }
 
     /**
-     * Run {@see MediaDerivativeService::create()} and translate the
-     * failure into a {@see ToolResult}. Returns the new {@see MediaAsset}
-     * on success.
-     *
-     * @return MediaAsset|ToolResult
+     * Run {@see MediaDerivativeProducerInterface::produce()} and
+     * {@see MediaDerivativeService::create()} back to back. On any
+     * failure, throw — the caller translates the throw into a
+     * {@see ToolResult} so the error path stays in one place.
      */
-    private function persistDerivativeOrFail(
-        MediaDerivativeProducerInterface $producer,
-        MediaAsset $parent,
-        DerivativeOutput $output,
-        string $format,
-        ?int $userId,
-        ?PrincipalContext $context,
-    ): MediaAsset|ToolResult {
-        try {
-            return $this->derivativeService->create(
-                parent: $parent,
-                output: $output,
-                format: $format,
-                producerPlugin: $producer->pluginSlug(),
-                producerOperation: $producer->operationName(),
-                userId: $userId,
-                context: $context,
-            );
-        } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_compile: failed to persist derivative: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Run the producer and translate compile / generic failures into
-     * a {@see ToolResult} when the produce call throws. Returns the
-     * {@see DerivativeOutput} on success.
-     *
-     * @return DerivativeOutput|ToolResult
-     */
-    private function produceOrFail(
+    private function producePersistOrThrow(
         MediaDerivativeProducerInterface $producer,
         MediaAsset $parent,
         string $format,
         array $arguments,
-    ): DerivativeOutput|ToolResult {
+        ?int $userId,
+        ?PrincipalContext $context,
+    ): MediaAsset {
         $page = isset($arguments['page']) ? max(0, (int) $arguments['page']) : null;
         $dpi  = isset($arguments['dpi']) ? max(36.0, min(600.0, (float) $arguments['dpi'])) : null;
 
         try {
-            return $producer->produce(
+            $output = $producer->produce(
                 source: $parent,
                 format: $format,
                 options: array_filter([
@@ -298,9 +257,23 @@ final class TypstCompileTool extends AbstractTypstTool
             if ($e->diagnostics === []) {
                 $lines[] = $e->getMessage();
             }
-            return new ToolResult(false, implode("\n", $lines));
+            throw new RuntimeException(implode("\n", $lines), 0, $e);
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_compile: ' . $e->getMessage());
+            throw new RuntimeException('typst_compile: ' . $e->getMessage(), 0, $e);
+        }
+
+        try {
+            return $this->derivativeService->create(
+                parent: $parent,
+                output: $output,
+                format: $format,
+                producerPlugin: $producer->pluginSlug(),
+                producerOperation: $producer->operationName(),
+                userId: $userId,
+                context: $context,
+            );
+        } catch (Throwable $e) {
+            throw new RuntimeException('typst_compile: failed to persist derivative: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -377,10 +350,6 @@ final class TypstCompileTool extends AbstractTypstTool
         }
         try {
             $png = $producer->produce($parent, 'png', ['page' => 0, 'dpi' => 144.0]);
-        } catch (Throwable) {
-            return '';
-        }
-        try {
             $pngDerivative = $this->derivativeService->create(
                 parent: $parent,
                 output: $png,
@@ -390,10 +359,10 @@ final class TypstCompileTool extends AbstractTypstTool
                 userId: null,
                 context: null,
             );
+            return $pngDerivative->asset_url;
         } catch (Throwable) {
             return '';
         }
-        return $pngDerivative->asset_url;
     }
 
     private function renderDiagnostic(string $label, object $d): string

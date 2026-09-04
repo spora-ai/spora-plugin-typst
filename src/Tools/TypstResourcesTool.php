@@ -7,7 +7,6 @@ namespace Spora\Plugins\Typst\Tools;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
-use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -90,11 +89,7 @@ use Throwable;
 )]
 final class TypstResourcesTool extends AbstractTypstTool
 {
-    public function __construct(
-        TypstWorldFactory $worldFactory,
-    ) {
-        parent::__construct($worldFactory);
-    }
+    private const TOOL_PREFIX = 'typst_resources: ';
 
     public function execute(
         array $arguments,
@@ -204,7 +199,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             TypstResourcePaths::assertValidKind($kind);
             $path = (new TypstResourceStore($paths))->write($kind, $name, $content);
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
         return ToolResult::ok(
             content: sprintf('typst_resources: wrote %d bytes to %s', strlen($content), $path),
@@ -222,7 +217,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             TypstResourcePaths::assertValidKind($kind);
             (new TypstResourceStore($paths))->delete($kind, $name);
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
         return ToolResult::ok(
             content: sprintf('typst_resources: deleted %s/%s', $kind, $name),
@@ -261,7 +256,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         try {
             $row = (new TypstImageStore($paths))->write($content, 'application/octet-stream', $name);
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
         return ToolResult::ok(
             content: sprintf('typst_resources: wrote %d bytes to %s', strlen($content), $row['name']),
@@ -278,7 +273,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         try {
             (new TypstImageStore($paths))->delete($name);
         } catch (Throwable $e) {
-            return new ToolResult(false, 'typst_resources: ' . $e->getMessage());
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
         return ToolResult::ok(
             content: sprintf('typst_resources: deleted image/%s', $name),
