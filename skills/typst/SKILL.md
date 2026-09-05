@@ -45,10 +45,12 @@ For routine compiles, the flow is `typst_compile(action: "inspect")` → fix →
 `typst_compile` accepts the source in one of two ways (for both `render` and `inspect`):
 
 ```jsonc
-// inline — small, ephemeral, freshly authored
-{ "source": "= Hello\n", "format": "pdf" }
+// inline — small, ephemeral, freshly authored (render accepts an optional `filename`)
+// when supplied, filename becomes the playground pool row name; .typ is auto-appended
+// when omitted, the tool picks `inline-YYYYMMDD-HHMMSS-XXXX.typ` for you
+{ "source": "= Hello\n", "filename": "letter.typ", "format": "pdf" }
 
-// file — a media asset id previously uploaded as .typ
+// file — a media asset id previously uploaded as .typ (distinct from filename — file is a UUID)
 { "file": "01HXYZ...", "format": "png", "page": 0 }
 ```
 
@@ -58,7 +60,11 @@ Default to inline. Switch to `file` when:
 - The source is bigger than ~4 KB (paste limit).
 - You want the natural-key idempotency of `media_derivatives` (re-rendering the same `file` with the same `format` refreshes the existing row instead of stacking duplicates).
 
-Inline sources are stored as transient `text/x-typst` parent rows so the derivative has a `parent_id` to attach to. The parent row carries the source bytes in `data_url` mode and is invisible to the media library's LIST endpoint (it's marked `plugin_slug='spora-plugin-typst'`, `tool_name='typst.render'`).
+`filename` is **optional** when `action="render"` is called with inline `source`. Pick a basename the user can recognise in the playground picker — `"letter.typ"`, `"cover-letter.typ"`, `"playground.typ"` — or omit it and the tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` name. The auto-name keeps the row findable in the file picker, so the previous "orphan parent" failure mode is gone without forcing every call to invent a basename. Two renders with the same `filename` produce sibling rows (the previous in-place overwrite behaviour is gone) so the user can compare revisions; the file picker surfaces both.
+
+> **`file` and `filename` are distinct keys.** `file` carries a media-asset UUID (the result of a prior `.typ` upload); `filename` carries a free-form basename that labels the row materialised from inline source. LLMs that reach for `<file>letter.typ</file>` when they mean a basename used to hit a hard validator error before any of our code ran — that path now auto-defaults. Don't conflate them: when you have a UUID, use `file`; when you have inline bytes you want to label, use `filename` (or omit it).
+
+`inspect` never persists. It runs `inspectString($bytes)` only and returns the structured diagnostics; no `MediaAsset` row is written, so an inspect call cannot leave orphan rows. A `filename` on an inspect call is ignored — `filename` is render-only.
 
 ## Format choice
 
@@ -88,6 +94,20 @@ When the inspector reports warnings only, the producer still renders — the war
 
 When the producer throws an unrelated exception (font unreadable, invalid source bytes), the tool returns the exception's message in `error`. The most common cause for fresh installs is missing tier-2 fonts — list them with `typst_resources(action="resources_list", kind="font")` and either upload the missing one or fall back to the bundled fonts.
 
+## Rendering
+
+Successful renders return three things in the `ToolResult`:
+
+1. **A heading line** like `Rendered PDF` (or `PNG` / `SVG`).
+2. **A markdown block** the chat UI renders inline. PDF returns `[Open PDF](url)` plus an optional first-page PNG preview; PNG/SVG return a single markdown image (`![…](url)`).
+3. **A trailing instruction** that reads:
+
+   > Echo the markdown block above verbatim so the chat UI renders the result inline. For raw URLs (e.g. to embed in a follow-up tool call), read `ToolResult.data.asset_urls`. Do NOT invent or rewrite URLs — `file://` and external domains are unsupported; the data channel is the only authoritative source.
+
+Echo the markdown block into your reply unchanged so the chat UI renders it inline. Use `ToolResult.data.asset_urls` for the raw URLs (a list — single entry today, kept as a list so multi-page / multi-format futures don't break you).
+
+**Do NOT invent or rewrite URLs.** When the LLM is asked to embed the result in a follow-up tool call (e.g. `#image(url)` in another Typst render, a markdown body in a follow-up, or an `input_image` URL for an image-generation call) the only safe source is `ToolResult.data.asset_urls`. LLMs that try to "help" by substituting `https://example.com/...` or `file:///tmp/...` produce URLs that don't resolve.
+
 ## Tool result shape
 
 Successful renders return:
@@ -95,7 +115,7 @@ Successful renders return:
 ```json
 {
   "derivative_id": "01HXYZ...",
-  "asset_url": "/api/v1/assets/01HXYZ....pdf",
+  "asset_urls": ["/api/v1/assets/01HXYZ....pdf"],
   "format": "pdf",
   "mime": "application/pdf",
   "size": 6532,
@@ -104,7 +124,7 @@ Successful renders return:
 }
 ```
 
-`width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The `asset_url` is stable across re-renders — calling `typst_compile(action: "render")` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
+For PDF the markdown content additionally includes the first-page PNG preview URL inline as a markdown image, but only the primary deliverable URL appears in `asset_urls`. `width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The URLs in `asset_urls` are stable across re-renders — calling `typst_compile(action: "render")` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
 
 ## Typst syntax primer (the minimum you need)
 

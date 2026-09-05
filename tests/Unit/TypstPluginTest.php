@@ -5,6 +5,7 @@ declare(strict_types=1);
 use Spora\Core\MiddlewareRouteCollector;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
+use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
@@ -16,6 +17,7 @@ use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Plugins\Typst\TypstApp;
 use Spora\Plugins\Typst\TypstPlugin;
+use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 
 /**
@@ -31,8 +33,14 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  */
 beforeEach(function () {
     MediaDerivativeProducerDiscovery::reset();
+    MediaConverterDiscovery::reset();
 
     $this->plugin = new TypstPlugin();
+});
+
+afterEach(function () {
+    MediaDerivativeProducerDiscovery::reset();
+    MediaConverterDiscovery::reset();
 });
 
 it('reports the spora-plugin-typst name from the registered TypstApp', function () {
@@ -44,6 +52,13 @@ it('registers TypstRenderProducer with the media-derivatives discovery at boot',
     $this->plugin->register($builder);
 
     expect(MediaDerivativeProducerDiscovery::all())->toContain(TypstRenderProducer::class);
+});
+
+it('registers TypstSourcePassthroughConverter with the media-converter discovery at boot', function () {
+    $builder = new DI\ContainerBuilder();
+    $this->plugin->register($builder);
+
+    expect(MediaConverterDiscovery::all())->toContain(TypstSourcePassthroughConverter::class);
 });
 
 it('registers every controller and tool FQCN as a PHP-DI autowire definition', function () {
