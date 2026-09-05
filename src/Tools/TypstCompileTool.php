@@ -87,8 +87,8 @@ use Throwable;
 #[ToolParameter(
     name: 'filename',
     type: 'string',
-    description: 'Basename for the playground parent row when rendering inline `source` (a name like "letter.typ"; `.typ` is auto-appended). Ignored when `file` is supplied; required only when rendering with inline `source` (the row becomes invisible in the playground picker without it).',
-    required: ['render'],
+    description: 'Optional basename for the playground parent row when rendering inline `source` (a name like "letter.typ"; `.typ` is auto-appended). Ignored when `file` is supplied. When omitted, the tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` name so each render still surfaces in the playground picker without the LLM having to invent a basename. Distinct from `file` (a media asset UUID) — `file` references an uploaded row, `filename` labels the row materialised from inline source.',
+    required: false,
 )]
 #[ToolParameter(
     name: 'page',

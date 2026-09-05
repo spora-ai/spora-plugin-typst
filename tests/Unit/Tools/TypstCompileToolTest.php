@@ -206,7 +206,7 @@ describe('render path', function (): void {
         expect($result->content)->toContain('TypstRenderProducer is not registered');
     });
 
-    it('returns a failed ToolResult when render is called with inline source but no filename', function () {
+    it('auto-generates a playground filename when render is called with inline source but no filename', function () {
         $this->fakeProducer = makeFakeProducer();
 
         $result = $this->tool->execute(
@@ -215,11 +215,14 @@ describe('render path', function (): void {
             userId: $this->userId,
             context: $this->context,
         );
-        expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('inline source requires filename');
+        expect($result->success)->toBeTrue();
+        // The data envelope carries the parent filename the tool picked
+        // (see ToolResult::data() in buildSuccessToolResult). The
+        // auto-generated name matches the documented format.
+        expect($result->data)->toBeArray();
     });
 
-    it('returns a failed ToolResult when render is called with inline source but filename is empty', function () {
+    it('auto-generates a playground filename when render is called with inline source but filename is empty', function () {
         $this->fakeProducer = makeFakeProducer();
 
         $result = $this->tool->execute(
@@ -228,8 +231,33 @@ describe('render path', function (): void {
             userId: $this->userId,
             context: $this->context,
         );
-        expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('inline source requires filename');
+        expect($result->success)->toBeTrue();
+    });
+
+    it('auto-generates a filename matching the inline-YYYYMMDD-HHMMSS-XXXX pattern', function () {
+        $this->fakeProducer = makeFakeProducer();
+
+        $this->tool->execute(
+            ['action' => 'render', 'source' => '= Hi', 'format' => 'pdf'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        // `materialiseNamedInlineSource` writes the parent playground
+        // row (tool_name='typst.playground', filename *.typ); the
+        // subsequent derivative create() writes a sibling row whose
+        // filename swaps the extension. Filter on tool_name so we
+        // pick the parent and not the just-newer derivative.
+        $parent = MediaAsset::query()
+            ->where('user_id', $this->userId)
+            ->where('plugin_slug', 'spora-plugin-typst')
+            ->where('tool_name', 'typst.playground')
+            ->where('filename', 'like', 'inline-%')
+            ->orderByDesc('created_at')
+            ->first();
+        expect($parent)->not->toBeNull();
+        expect($parent->filename)->toMatch('/^inline-\d{8}-\d{6}-[0-9a-f]{4}\.typ$/');
     });
 
     it('returns a failed ToolResult when the producer throws TypstCompilationException', function () {

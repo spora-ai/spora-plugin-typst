@@ -101,10 +101,17 @@ abstract class AbstractTypstTool extends AbstractTool
 
     /**
      * Resolve the source bytes + parent `MediaAsset` for a render
-     * call. Inline `source` requires a `filename` argument (the
-     * parent row is materialised in the playground pool under that
-     * name); `file=<id>` reuses the existing parent and ignores
-     * `filename` if also supplied.
+     * call. Inline `source` uses the LLM-supplied `filename` (or an
+     * auto-generated `inline-YYYYMMDD-HHMMSS-XXXX.typ` when omitted)
+     * as the playground pool row name; `file=<id>` reuses the
+     * existing parent and ignores `filename` if also supplied.
+     *
+     * Auto-defaulting the filename was added because LLMs
+     * habitually reach for `file` when they mean a basename and the
+     * schema's `file` is reserved for media asset UUIDs. Forcing the
+     * LLM to invent a basename just to render inline source was a
+     * straight jacket — the `inspect` action already accepts inline
+     * `source` with no name, and `render` should be no harder.
      *
      * @return array{bytes: string, parent: MediaAsset}
      */
@@ -123,13 +130,10 @@ abstract class AbstractTypstTool extends AbstractTool
 
         if (is_string($source) && $source !== '') {
             $rawName = $arguments['filename'] ?? null;
-            if (!is_string($rawName) || $rawName === '') {
-                throw new TypstInvalidArgumentException(
-                    'typst_compile: inline source requires filename (a basename like "letter.typ"; '
-                    . 'used as the parent row name in the playground pool)',
-                );
+            if (!is_string($rawName) || trim($rawName) === '') {
+                $rawName = $this->autoFilename();
             }
-            $name = TypstFilename::sanitise($rawName, 'playground.typ');
+            $name = TypstFilename::sanitise($rawName, 'inline.typ');
             $parent = $this->materialiseNamedInlineSource($source, $name, $agentId, $userId, $context);
             return ['bytes' => $source, 'parent' => $parent];
         }
@@ -137,6 +141,21 @@ abstract class AbstractTypstTool extends AbstractTool
         throw new TypstInvalidArgumentException(
             'Typst tool: either `source` (inline string) or `file` (media asset id) is required',
         );
+    }
+
+    /**
+     * Build a deterministic-but-unique-enough playground name for a
+     * render call where the LLM didn't supply `filename`. Format is
+     * `inline-YYYYMMDD-HHMMSS-XXXX.typ` where XXXX is 4 random hex
+     * chars — human-readable, sortable, and short enough to fit in
+     * the playground picker's narrow column. Each render inserts a
+     * sibling row even on collision (see the materialise helper's
+     * docblock), so over-the-wire uniqueness within the same second
+     * relies on the random suffix.
+     */
+    private function autoFilename(): string
+    {
+        return sprintf('inline-%s-%s.typ', date('Ymd-His'), bin2hex(random_bytes(2)));
     }
 
     private function loadAssetSource(string $fileId, ?PrincipalContext $context, ?int $userId): array

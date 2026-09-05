@@ -87,14 +87,22 @@ The plugin's test suite has two parts:
 
 `typst_compile` accepts the source as either:
 
-- `source` (inline UTF-8 Typst source) — required when used:
+- `source` (inline UTF-8 Typst source) — paired with an optional
   `filename` (the playground pool row name; `.typ` is auto-appended).
   The parent row always lives in `tool_name='typst.playground'`, so
   it surfaces in the file picker; filename collisions create a
   sibling row rather than overwriting the existing source.
+  When `filename` is omitted, the tool auto-generates one
+  (`inline-YYYYMMDD-HHMMSS-XXXX.typ`) so a render without an
+  explicit basename still drops a findable row in the playground.
 - `file` (a previously-uploaded `.typ` media asset id) — renders the
   parent bytes. Re-rendering the same `(file, format)` pair refreshes the
   existing derivative row. `filename` is ignored on this path.
+
+> `file` and `filename` are distinct: `file` carries a media-asset UUID,
+> `filename` carries a free-form basename for inline source. LLMs
+> frequently reach for `file` when they mean `filename`; the tool
+> auto-defaults in that case rather than rejecting the call.
 
 `inspect` never persists: it runs `inspectString($bytes)` only and
 returns the structured diagnostics. No `MediaAsset` row is written,
