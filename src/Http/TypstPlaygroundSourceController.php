@@ -97,18 +97,12 @@ final class TypstPlaygroundSourceController
      */
     public function index(Request $request): JsonResponse
     {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            return $this->unauthenticated();
-        }
-
         try {
-            $principalId = $this->resolvePrincipalId($request, $userId);
+            $userId = $this->requireUserId();
+            $principalId = $this->resolvePrincipalIdOrFail($request, $userId);
             $kind = $this->resolveKind($request);
         } catch (PlaygroundRequestFailed $e) {
             return $e->response;
-        } catch (RuntimeException $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
         }
 
         $query = MediaAsset::query()
@@ -156,16 +150,12 @@ final class TypstPlaygroundSourceController
     {
         $toolName     = isset($a->tool_name) ? (string) $a->tool_name : '';
         $uploadSource = isset($a->upload_source) ? (string) $a->upload_source : '';
-        if ($toolName === 'typst.playground') {
-            return 'saved';
-        }
-        if ($toolName === 'typst.render') {
-            return 'generated';
-        }
-        if ($uploadSource === 'upload') {
-            return 'uploaded';
-        }
-        return 'other';
+        return match (true) {
+            $toolName === 'typst.playground' => 'saved',
+            $toolName === 'typst.render'     => 'generated',
+            $uploadSource === 'upload'       => 'uploaded',
+            default                          => 'other',
+        };
     }
 
     /**
@@ -177,16 +167,12 @@ final class TypstPlaygroundSourceController
      */
     private function kindForRow(MediaAsset $a): string
     {
-        if ($a->tool_name === 'typst.playground') {
-            return 'saved';
-        }
-        if ($a->tool_name === 'typst.render') {
-            return 'generated';
-        }
-        if ($a->upload_source === 'upload') {
-            return 'uploaded';
-        }
-        return 'other';
+        return match (true) {
+            $a->tool_name === 'typst.playground' => 'saved',
+            $a->tool_name === 'typst.render'     => 'generated',
+            $a->upload_source === 'upload'       => 'uploaded',
+            default                              => 'other',
+        };
     }
 
     /**
@@ -479,6 +465,24 @@ final class TypstPlaygroundSourceController
             throw new TypstRuntimeException('Principal not visible to caller');
         }
         return $requestedId;
+    }
+
+    /**
+     * Variant of {@see resolvePrincipalId()} that throws
+     * {@see PlaygroundRequestFailed} with a 404 envelope instead of
+     * a raw {@see RuntimeException}. Used by the row-less endpoints
+     * (`index()`) so they don't have to carry a second catch arm
+     * just to map `TypstRuntimeException` to a 404.
+     */
+    private function resolvePrincipalIdOrFail(Request $request, int $userId): int
+    {
+        try {
+            return $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new PlaygroundRequestFailed(
+                $this->notFound('NOT_FOUND', $e->getMessage()),
+            );
+        }
     }
 
     /**

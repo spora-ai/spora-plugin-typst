@@ -126,7 +126,7 @@ final class TypstCompileTool extends AbstractTypstTool
         $action = $this->resolveAction($arguments);
 
         return match ($action) {
-            'inspect' => $this->inspectSource($arguments, $agentId, $userId, $context),
+            'inspect' => $this->inspectSource($arguments, $userId, $context),
             'render', '' => $this->renderSource($arguments, $agentId, $userId, $context),
             default    => new ToolResult(false, sprintf(
                 'typst_compile: unknown action "%s" (expected: render | inspect)',
@@ -166,7 +166,7 @@ final class TypstCompileTool extends AbstractTypstTool
         return 'inline';
     }
 
-    private function inspectSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
+    private function inspectSource(array $arguments, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         try {
             $resolved = $this->resolveSourceBytes($arguments, $context, $userId);
