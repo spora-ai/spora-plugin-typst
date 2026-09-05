@@ -458,7 +458,14 @@ describe('render path', function (): void {
         if ($result->success) {
             expect($result->data['format'])->toBe('pdf');
             expect($result->data['mime'])->toBe(COMPILE_TOOL_PDF_MIME);
+            expect($result->data['asset_urls'])->toBeArray();
+            expect($result->data['asset_urls'])->toHaveCount(1);
+            expect($result->data['asset_urls'][0])->toStartWith('/api/v1/assets/');
+            expect($result->content)->toContain('Rendered PDF');
             expect($result->content)->toContain('[Open PDF]');
+            expect($result->content)->toContain('Echo the markdown block above verbatim');
+            expect($result->content)->toContain('Do NOT invent or rewrite URLs');
+            expect($result->content)->toContain('file://');
         } else {
             // The end-to-end path touches the full DB / asset-store
             // pipeline — if the test environment is missing one of
@@ -483,7 +490,17 @@ describe('render path', function (): void {
         if ($result->success) {
             expect($result->data['format'])->toBe('png');
             expect($result->data['mime'])->toBe(COMPILE_TOOL_PNG_MIME);
+            expect($result->data['asset_urls'])->toBeArray();
+            expect($result->data['asset_urls'])->toHaveCount(1);
+            expect($result->data['asset_urls'][0])->toStartWith('/api/v1/assets/');
+            expect($result->content)->toContain('Rendered PNG');
             expect($result->content)->not->toContain('[Open PDF]');
+            expect($result->content)->toContain('Echo the markdown block above verbatim');
+            // PNG branch must use the markdown image embed for inline
+            // rendering; verifying the ![…](…) pattern appears once
+            // (the heading + image + echo instruction, no link prefix).
+            expect($result->content)->toContain('![');
+            expect($result->content)->toContain('Do NOT invent or rewrite URLs');
         } else {
             expect($result->success)->toBeFalse();
         }

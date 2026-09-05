@@ -20,6 +20,7 @@ use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\MediaEmbed;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -320,9 +321,26 @@ final class TypstCompileTool extends AbstractTypstTool
 
     /**
      * Build the success {@see ToolResult} for a successful render.
-     * For PDF outputs, attaches a first-page PNG preview URL so the
-     * chat UI's `MediaEmbed` can render the document inline; for
-     * other formats the asset URL is enough.
+     *
+     * Mirrors `OpenAIImageGenerationTool::renderResponse()`: a heading
+     * summarising the deliverable, a markdown block the chat UI
+     * renders inline, and a trailing instruction telling the LLM
+     * where to find the raw URLs (the `data.asset_urls` channel)
+     * instead of inventing its own. The instruction explicitly bars
+     * `file://` and external-domain URLs because LLMs hallucinate
+     * both when asked to "embed" or "link to" the result in a
+     * follow-up call.
+     *
+     * For PDF outputs the markdown block is a `[Open PDF](url)` link
+     * paired with a first-page PNG preview rendered inline. For PNG
+     * and SVG it's a single markdown image.
+     *
+     * `asset_urls` is the authoritative URL channel; the previous
+     * `asset_url` (singular string) was removed because the LLM has
+     * no reliable way to know whether a tool field is a string or a
+     * list, and the OpenAI plugin already standardised on a plural
+     * list (`image_urls`). The HTTP controller payload keeps
+     * `asset_url` because the typst-frontend binds to it.
      */
     private function buildSuccessToolResult(
         MediaAsset $derivative,
@@ -332,15 +350,22 @@ final class TypstCompileTool extends AbstractTypstTool
         $url = $derivative->asset_url;
         $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
 
-        $content = $format === 'pdf'
+        $body = $format === 'pdf'
             ? $this->pdfRenderContent($url, $alt, $parent)
-            : sprintf('![%s](%s)', $alt, $url);
+            : MediaEmbed::image($url, $alt);
+
+        $content = sprintf(
+            "Rendered %s\n\n%s\n\n%s",
+            strtoupper($format),
+            $body,
+            $this->echoInstruction(),
+        );
 
         return ToolResult::ok(
             content: $content,
             data: [
                 'derivative_id' => $derivative->id,
-                'asset_url'     => $url,
+                'asset_urls'    => [$url],
                 'format'        => $format,
                 'mime'          => $derivative->mime_type,
                 'size'          => $derivative->byte_size,
@@ -359,9 +384,32 @@ final class TypstCompileTool extends AbstractTypstTool
     private function pdfRenderContent(string $url, string $alt, MediaAsset $parent): string
     {
         $previewUrl = $this->firstPagePngUrl($parent);
-        return $previewUrl !== ''
-            ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
-            : sprintf("[Open PDF](%s)", $url);
+        if ($previewUrl === '') {
+            return sprintf('[Open PDF](%s)', $url);
+        }
+        return sprintf(
+            "[Open PDF](%s)\n\n%s",
+            $url,
+            MediaEmbed::image($previewUrl, $alt . ' (first-page preview)'),
+        );
+    }
+
+    /**
+     * Trailing instruction for every successful render. Tells the LLM
+     * to echo the markdown block above verbatim so the chat UI
+     * renders it inline, and to read raw URLs from
+     * `ToolResult.data.asset_urls` rather than constructing its own
+     * — the explicit `file://` / external-domain warning is the
+     * preventative half: LLMs that try to embed the result in a
+     * follow-up call otherwise hallucinate `file:///tmp/...` or
+     * `https://example.com/...` URLs that don't resolve.
+     */
+    private function echoInstruction(): string
+    {
+        return 'Echo the markdown block above verbatim so the chat UI renders the result inline. '
+            . 'For raw URLs (e.g. to embed in a follow-up tool call), read ToolResult.data.asset_urls. '
+            . 'Do NOT invent or rewrite URLs — `file://` and external domains are unsupported; '
+            . 'the data channel is the only authoritative source.';
     }
 
     /**

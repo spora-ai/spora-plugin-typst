@@ -204,6 +204,14 @@ The response shape:
 }
 ```
 
+> The HTTP controller payload above uses `asset_url` (singular). When
+> the LLM-facing `typst_compile` tool surfaces the same result, the
+> `ToolResult.data` envelope carries `asset_urls` (a list, kept
+> plural even when one entry) — the canonical URL channel that
+> downstream tool calls should read. See `skills/typst/SKILL.md` for
+> the LLM-facing shape and the explicit "do not invent URLs"
+> instruction that mirrors the OpenAI image plugin.
+
 Permission model: `POST /api/v1/typst/compile` is scoped to the
 caller's user-principal (no `?principal_id=N`). The derivative row
 inherits the parent principal automatically; PDFs and PNGs both end up
