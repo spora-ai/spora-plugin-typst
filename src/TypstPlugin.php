@@ -9,6 +9,7 @@ use Spora\Core\MiddlewareRouteCollector;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
+use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
@@ -18,6 +19,7 @@ use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
+use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 
 /**
@@ -71,9 +73,8 @@ final class TypstPlugin extends AbstractPlugin
 
     /**
      * Wire DI bindings for the controllers + tools, and register the
-     * `TypstRenderProducer` with the media-derivatives discovery
-     * registry so the core `/api/v1/media/{id}/derivatives` endpoint
-     * can dispatch to it.
+     * `TypstRenderProducer` and `TypstSourcePassthroughConverter` with the
+     * media discovery registries.
      *
      * PHP-DI autowires the constructors; explicit bindings here are
      * only for the cases where the host `App` cannot resolve the
@@ -96,6 +97,10 @@ final class TypstPlugin extends AbstractPlugin
         // Idempotent — `MediaDerivativeProducerDiscovery::add()` no-ops
         // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
+
+        // `text/x-typst` is plugin-supplied, so registration adds it to
+        // the upload allowlist.
+        MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
     /**

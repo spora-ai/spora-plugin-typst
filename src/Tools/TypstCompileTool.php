@@ -20,6 +20,7 @@ use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
 use Spora\Tools\Attributes\ToolParameter;
+use Spora\Tools\MediaEmbed;
 use Spora\Tools\ValueObjects\ToolResult;
 use Throwable;
 
@@ -85,6 +86,12 @@ use Throwable;
     required: false,
 )]
 #[ToolParameter(
+    name: 'filename',
+    type: 'string',
+    description: 'Optional basename for the playground parent row when rendering inline `source` (a name like "letter.typ"; `.typ` is auto-appended). Ignored when `file` is supplied. When omitted, the tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` name so each render still surfaces in the playground picker without the LLM having to invent a basename. Distinct from `file` (a media asset UUID) — `file` references an uploaded row, `filename` labels the row materialised from inline source.',
+    required: false,
+)]
+#[ToolParameter(
     name: 'page',
     type: 'integer',
     description: 'Page number to render for png/svg (0-indexed; default 0). Ignored when action=inspect or format=pdf.',
@@ -120,7 +127,7 @@ final class TypstCompileTool extends AbstractTypstTool
         $action = $this->resolveAction($arguments);
 
         return match ($action) {
-            'inspect' => $this->inspectSource($arguments, $agentId, $userId, $context),
+            'inspect' => $this->inspectSource($arguments, $userId, $context),
             'render', '' => $this->renderSource($arguments, $agentId, $userId, $context),
             default    => new ToolResult(false, sprintf(
                 'typst_compile: unknown action "%s" (expected: render | inspect)',
@@ -132,7 +139,7 @@ final class TypstCompileTool extends AbstractTypstTool
     public function describeAction(array $arguments): string
     {
         $action = $this->resolveAction($arguments);
-        $what   = isset($arguments['file']) ? 'file=' . substr((string) $arguments['file'], 0, 8) : 'inline source';
+        $what = $this->describeSource($arguments);
         if ($action === 'inspect') {
             return sprintf('Typst inspect (%s)', $what);
         }
@@ -140,10 +147,30 @@ final class TypstCompileTool extends AbstractTypstTool
         return sprintf('Typst render → %s (%s)', $format, $what);
     }
 
-    private function inspectSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
+    /**
+     * Build the source descriptor shown in {@see describeAction()}.
+     * For `file=<id>` shows the file prefix; for inline `source`
+     * shows the supplied `filename` when one is given (so the
+     * approval UI surfaces the row name the LLM picked), or the
+     * literal "inline" when no filename is supplied.
+     */
+    private function describeSource(array $arguments): string
+    {
+        if (isset($arguments['file']) && is_string($arguments['file']) && $arguments['file'] !== '') {
+            return 'file=' . substr($arguments['file'], 0, 8);
+        }
+        $rawName = $arguments['filename'] ?? null;
+        if (is_string($rawName) && $rawName !== '') {
+            $name = trim($rawName);
+            return $name === '' ? 'inline' : $name;
+        }
+        return 'inline';
+    }
+
+    private function inspectSource(array $arguments, ?int $userId, ?PrincipalContext $context): ToolResult
     {
         try {
-            $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
+            $resolved = $this->resolveSourceBytes($arguments, $context, $userId);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
@@ -206,7 +233,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 ));
             }
 
-            $resolved = $this->resolveSource($arguments, $agentId, $userId, $context);
+            $resolved = $this->resolveSourceForRender($arguments, $agentId, $userId, $context);
             $producer = $this->findProducer();
             if ($producer === null) {
                 throw new TypstRuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');
@@ -294,9 +321,26 @@ final class TypstCompileTool extends AbstractTypstTool
 
     /**
      * Build the success {@see ToolResult} for a successful render.
-     * For PDF outputs, attaches a first-page PNG preview URL so the
-     * chat UI's `MediaEmbed` can render the document inline; for
-     * other formats the asset URL is enough.
+     *
+     * Mirrors `OpenAIImageGenerationTool::renderResponse()`: a heading
+     * summarising the deliverable, a markdown block the chat UI
+     * renders inline, and a trailing instruction telling the LLM
+     * where to find the raw URLs (the `data.asset_urls` channel)
+     * instead of inventing its own. The instruction explicitly bars
+     * `file://` and external-domain URLs because LLMs hallucinate
+     * both when asked to "embed" or "link to" the result in a
+     * follow-up call.
+     *
+     * For PDF outputs the markdown block is a `[Open PDF](url)` link
+     * paired with a first-page PNG preview rendered inline. For PNG
+     * and SVG it's a single markdown image.
+     *
+     * `asset_urls` is the authoritative URL channel; the previous
+     * `asset_url` (singular string) was removed because the LLM has
+     * no reliable way to know whether a tool field is a string or a
+     * list, and the OpenAI plugin already standardised on a plural
+     * list (`image_urls`). The HTTP controller payload keeps
+     * `asset_url` because the typst-frontend binds to it.
      */
     private function buildSuccessToolResult(
         MediaAsset $derivative,
@@ -306,15 +350,22 @@ final class TypstCompileTool extends AbstractTypstTool
         $url = $derivative->asset_url;
         $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
 
-        $content = $format === 'pdf'
+        $body = $format === 'pdf'
             ? $this->pdfRenderContent($url, $alt, $parent)
-            : sprintf('![%s](%s)', $alt, $url);
+            : MediaEmbed::image($url, $alt);
+
+        $content = sprintf(
+            "Rendered %s\n\n%s\n\n%s",
+            strtoupper($format),
+            $body,
+            $this->echoInstruction(),
+        );
 
         return ToolResult::ok(
             content: $content,
             data: [
                 'derivative_id' => $derivative->id,
-                'asset_url'     => $url,
+                'asset_urls'    => [$url],
                 'format'        => $format,
                 'mime'          => $derivative->mime_type,
                 'size'          => $derivative->byte_size,
@@ -333,9 +384,32 @@ final class TypstCompileTool extends AbstractTypstTool
     private function pdfRenderContent(string $url, string $alt, MediaAsset $parent): string
     {
         $previewUrl = $this->firstPagePngUrl($parent);
-        return $previewUrl !== ''
-            ? sprintf("[Open PDF](%s)\n\n![%s](%s)", $url, $alt, $previewUrl)
-            : sprintf("[Open PDF](%s)", $url);
+        if ($previewUrl === '') {
+            return sprintf('[Open PDF](%s)', $url);
+        }
+        return sprintf(
+            "[Open PDF](%s)\n\n%s",
+            $url,
+            MediaEmbed::image($previewUrl, $alt . ' (first-page preview)'),
+        );
+    }
+
+    /**
+     * Trailing instruction for every successful render. Tells the LLM
+     * to echo the markdown block above verbatim so the chat UI
+     * renders it inline, and to read raw URLs from
+     * `ToolResult.data.asset_urls` rather than constructing its own
+     * — the explicit `file://` / external-domain warning is the
+     * preventative half: LLMs that try to embed the result in a
+     * follow-up call otherwise hallucinate `file:///tmp/...` or
+     * `https://example.com/...` URLs that don't resolve.
+     */
+    private function echoInstruction(): string
+    {
+        return 'Echo the markdown block above verbatim so the chat UI renders the result inline. '
+            . 'For raw URLs (e.g. to embed in a follow-up tool call), read ToolResult.data.asset_urls. '
+            . 'Do NOT invent or rewrite URLs — `file://` and external domains are unsupported; '
+            . 'the data channel is the only authoritative source.';
     }
 
     /**

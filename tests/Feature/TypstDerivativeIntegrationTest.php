@@ -36,7 +36,7 @@ it('produces a derivative through MediaDerivativeService and persists it', funct
     $parent->mime_type = 'text/x-typst';
     $parent->media_type = 'document';
     $parent->byte_size = 8;
-    $parent->filename = 'inline-source.typ';
+    $parent->filename = 'sample.typ';
     $parent->storage_mode = 'data_url';
     $parent->asset_token = bin2hex(random_bytes(16));
     $parent->payload = "= Hello\n";

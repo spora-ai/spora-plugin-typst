@@ -12,7 +12,9 @@ use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
+use Spora\Plugins\Typst\Services\TypstFilename;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -47,18 +49,15 @@ use Throwable;
  *
  * The controller materialises an inline `text/x-typst` parent row so
  * the natural-key on `media_derivatives` is well-defined (the producer
- * operates on a {@see MediaAsset}, not raw bytes) and re-renders are
- * idempotent: hitting the endpoint twice with the same source overwrites
- * the existing derivative's bytes rather than stacking rows.
+ * operates on a {@see MediaAsset}, not raw bytes). The parent row is
+ * always INSERTed — filename collisions produce a sibling row, never
+ * an in-place overwrite. Re-rendering the same parent still refreshes
+ * derivatives in place via the `(parent_id, format, producer_plugin,
+ * producer_operation)` natural key, so no idempotency is lost.
  *
- * The source-side natural key is
- * `(principal_id, tool_name='typst.playground', filename)`. The operator
- * picks the filename (default `playground.typ` for the legacy "untitled"
- * flow), and a second compile with the same filename overwrites the
- * existing parent row in place rather than stacking rows in the media
- * archive. List / open / edit / delete of those parent rows is handled
- * by {@see TypstPlaygroundSourceController}; this controller's only
- * job is to keep the parent row current as a side-effect of compiling.
+ * List / open / edit / delete of those parent rows is handled by
+ * {@see TypstPlaygroundSourceController}; this controller's only job
+ * is to materialise the parent row as a side-effect of compiling.
  *
  * For PDF the controller also produces a first-page PNG sibling so the
  * UI can render an inline preview without a second round-trip — the
@@ -174,7 +173,7 @@ final class TypstCompileController
         int $userId,
     ): JsonResponse {
         try {
-            $parent = $this->safeUpsertInlineSource($inputs->source, $inputs->name, $context);
+            $parent = $this->safeMaterialiseInlineSource($inputs->source, $inputs->name, $context);
             $output = $this->safeProduce($producer, $parent, $inputs);
             $derivative = $this->safePersistDerivative(
                 $producer,
@@ -193,10 +192,10 @@ final class TypstCompileController
         return new JsonResponse(['data' => $payload], Response::HTTP_OK);
     }
 
-    private function safeUpsertInlineSource(string $source, string $name, PrincipalContext $context): MediaAsset
+    private function safeMaterialiseInlineSource(string $source, string $name, PrincipalContext $context): MediaAsset
     {
         try {
-            return $this->upsertInlineSource($source, $name, $context);
+            return $this->materialiseInlineSource($source, $name, $context);
         } catch (Throwable $e) {
             throw new CompileStepFailed(self::STEP_PERSIST_SOURCE, $e);
         }
@@ -361,68 +360,41 @@ final class TypstCompileController
      * missing. Rejects anything that would escape the principal's
      * directory (path traversal, control chars, NUL bytes).
      *
+     * The actual regex / length rule lives in
+     * {@see TypstFilename::sanitise()} so this controller, the
+     * playground source controller, and the `typst_compile` tool
+     * share one definition.
+     *
      * Throws {@see CompileInputValidation} on rejection so this
      * method stays within Sonar's S1142 budget (≤ 3 returns).
      */
     private function validateName(mixed $raw): string
     {
-        if ($raw === null || $raw === '') {
-            return self::DEFAULT_NAME;
-        }
-        if (!is_string($raw)) {
+        try {
+            return TypstFilename::sanitise($raw, self::DEFAULT_NAME);
+        } catch (TypstInvalidArgumentException $e) {
             throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', 'name must be a string'),
+                $this->unprocessable('VALIDATION_ERROR', $e->getMessage()),
             );
         }
-        $trimmed = trim($raw);
-        if ($trimmed === '') {
-            return self::DEFAULT_NAME;
-        }
-        if (preg_match('/[\x00-\x1f\x7f\/\\\\]/', $trimmed) === 1) {
-            throw new CompileInputValidation(
-                $this->unprocessable(
-                    'VALIDATION_ERROR',
-                    'name contains illegal characters (no path separators or control bytes)',
-                ),
-            );
-        }
-        if (strlen($trimmed) > 128) {
-            throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', 'name is too long (max 128 chars)'),
-            );
-        }
-        if (!str_ends_with($trimmed, '.typ')) {
-            $trimmed .= '.typ';
-        }
-        return $trimmed;
     }
 
     /**
-     * Look up an existing playground source by its natural key
-     * `(principal_id, tool_name='typst.playground', filename)` and
-     * overwrite its `payload` in place. If no row exists, create a
-     * fresh one. The derivative natural key
-     * `(parent_id, format, producer_plugin, producer_operation)` then
-     * keys off the same id, so the next compile of the same file
-     * overwrites both source and render in place.
+     * Insert a fresh playground source row. Always INSERTs — the
+     * previous `upsertInlineSource()` shape collapsed identical
+     * filenames onto a single row, which made `playground.typ` a
+     * single shared scratchpad across sessions and silently
+     * overwrote whatever the operator had been editing.
+     *
+     * Idempotency is preserved at the derivative layer: the
+     * `(parent_id, format, producer_plugin, producer_operation)`
+     * natural key on `media_derivatives` still keys off the same
+     * id, so the next compile of the same parent refreshes
+     * derivatives in place even when the source row is new.
      */
-    private function upsertInlineSource(string $source, string $name, PrincipalContext $context): MediaAsset
+    private function materialiseInlineSource(string $source, string $name, PrincipalContext $context): MediaAsset
     {
         $principalId = $context->principalId > 0 ? (int) $context->principalId : null;
-        $existing = MediaAsset::query()
-            ->where('principal_id', $principalId)
-            ->where('tool_name', 'typst.playground')
-            ->where('filename', $name)
-            ->first();
-
-        if ($existing !== null) {
-            $existing->payload     = $source;
-            $existing->byte_size   = strlen($source);
-            $existing->updated_at  = \Illuminate\Support\Carbon::now();
-            $existing->save();
-            return $existing;
-        }
-
         $id = self::generateUuid();
         $asset = new MediaAsset();
         $asset->id            = $id;
