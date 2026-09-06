@@ -152,10 +152,8 @@ final class TypstCompileTool extends AbstractTypstTool
             $inspector = $this->inspectorFactory !== null
                 ? ($this->inspectorFactory)()
                 : $this->worldFactory->build($context?->principalId)['inspector'];
-            // Mirror the producer's wrap so the inspector's
-            // font-discovery sees the same defaults — otherwise
-            // "no font could be found" surfaces in inspect but
-            // disappears in render.
+            // Mirror the producer's wrap so inspect and render see the same font
+            // defaults — otherwise "no font could be found" surfaces only here.
             $wrapped = $this->worldFactory->wrapSource($resolved['bytes']);
             $result = $inspector->inspectString($wrapped);
         } catch (Throwable $e) {

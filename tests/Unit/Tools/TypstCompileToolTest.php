@@ -458,12 +458,8 @@ describe('inspect path', function (): void {
     });
 
     it('wraps the inspector input with the prelude so it sees the same font defaults as the producer', function () {
-        // The inspector is called with the raw source; if it
-        // weren't wrapped, a math source without an explicit
-        // math-font declaration would surface "no font could be
-        // found" here but disappear on the render path. This
-        // fixture captures the source the inspector sees so a
-        // future refactor can't quietly drop the wrap.
+        // Pins the wrap — without it, "no font could be found" leaks
+        // here but disappears on the render path.
         $inspector = new class {
             /** @var array<int, string> */
             public array $recorded = [];

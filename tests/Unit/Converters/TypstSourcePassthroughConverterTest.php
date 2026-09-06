@@ -6,15 +6,9 @@ use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Services\MediaArchive\MediaConverterInterface;
 
 /**
- * Pin down the contract {@see TypstSourcePassthroughConverter}
- * exposes to the media archive's converter registry.
- *
- * The converter's job is tiny: declare the `.typ` MIME / extension
- * the upload allowlist should accept and return the bytes as-is for
- * `markdown_content`. The whole point of these tests is that the
- * registry hooks (allowed-MIME union, findFor() by MIME and by
- * extension) see this converter exactly like any other plugin
- * converter \u2014 not as a special case.
+ * Pin down the contract the converter exposes to the media archive
+ * registry: declares `text/x-typst` and the `typ` extension, returns
+ * the bytes as-is for `markdown_content`.
  */
 it('declares the text/x-typst MIME and the typ extension', function (): void {
     $converter = new TypstSourcePassthroughConverter();
@@ -28,8 +22,6 @@ it('is wired as a MediaConverterInterface so the registry will pick it up', func
 });
 
 it('returns the bytes as-is for toMarkdown (Typst source is plain UTF-8 text)', function (): void {
-    // trim() strips only the leading/trailing whitespace; inner
-    // newlines and content pass through verbatim.
     $bytes = "= Hello, world!\n\nThis is a Typst document.\n";
     $converter = new TypstSourcePassthroughConverter();
 

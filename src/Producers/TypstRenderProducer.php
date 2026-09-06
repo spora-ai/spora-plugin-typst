@@ -127,10 +127,9 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         $stack = $this->worldFactory->build($principalId);
 
         // Wrap with the factory's prelude so a document without an
-        // explicit `#set text(font: …)` still renders — and a math
-        // block without `#show math.equation: set text(font: …)`
-        // doesn't trip ext-typst's "no font could be found" error.
-        // The user's own set/show rules later in the file override.
+        // explicit `#set text(font: …)` (or math-mode setup) still
+        // renders; user-authored set/show rules later in the file
+        // override the prelude's defaults.
         $wrapped = $this->worldFactory->wrapSource($sourceBytes);
 
         // Diagnostics-first: refuse to render when the inspector

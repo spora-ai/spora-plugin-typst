@@ -129,17 +129,12 @@ it('clamps the requested page number to the document\'s page count', function ()
 });
 
 it('renders math blocks without an explicit math-font declaration', function () {
-    // ext-typst's font auto-discovery does not pick up
-    // `latinmodern-math.otf` for math mode — a bare `$x = 1$`
-    // aborts with "no font could be found". The producer's wrap
-    // prepends `#show math.equation: set text(font: "Latin Modern
-    // Math")` so a document that says nothing about fonts still
-    // renders. Operators wanting a different math font override
-    // the show rule later in their source.
+    // ext-typst's auto-discovery doesn't pick latinmodern-math.otf up
+    // for math mode — a bare `$x = 1$` aborts with "no font could be
+    // found". The producer's prelude fills the gap.
     //
-    // Single-quoted heredoc — `$` is the Typst math-mode opener and
-    // double-quoting it would let PHP interpolate it as an
-    // undefined variable, mangling the fixture.
+    // Single-quoted heredoc so PHP doesn't interpolate `$x = 1$` as
+    // variables.
     $asset = new MediaAsset();
     $asset->id = 'inline-6';
     $asset->mime_type = PRODUCER_TYPST_MIME;
@@ -156,10 +151,8 @@ TYPST;
 });
 
 it('honours a user-authored text font override despite the prelude', function () {
-    // The prelude's `#set text(font: ...)` is the FIRST rule in
-    // the file; a later `#set text(font: ...)` from the document
-    // overrides it. This test pins that the user can still pick
-    // a different font without the prelude fighting them.
+    // Pins that a user-authored `#set text(font: …)` later in the file
+    // overrides the prelude without a fight.
     $asset = new MediaAsset();
     $asset->id = 'inline-7';
     $asset->mime_type = PRODUCER_TYPST_MIME;

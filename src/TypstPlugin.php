@@ -99,11 +99,8 @@ final class TypstPlugin extends AbstractPlugin
         // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-        // Register the `.typ` text passthrough so a `.typ` upload is
-        // accepted by the upload allowlist (`text/x-typst` is not in
-        // core's static TEXT_MIME_TYPES; the converter-supplied branch
-        // of `MediaAllowedTypesService` pulls it in). Mirrors how the
-        // PDF converter makes `application/pdf` uploadable.
+        // Idempotent — `MediaConverterDiscovery::add()` no-ops if the
+        // FQCN is already registered, so re-registration is safe.
         MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
