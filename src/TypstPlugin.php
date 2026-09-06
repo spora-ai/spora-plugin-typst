@@ -73,9 +73,8 @@ final class TypstPlugin extends AbstractPlugin
 
     /**
      * Wire DI bindings for the controllers + tools, and register the
-     * `TypstRenderProducer` with the media-derivatives discovery
-     * registry so the core `/api/v1/media/{id}/derivatives` endpoint
-     * can dispatch to it.
+     * `TypstRenderProducer` and `TypstSourcePassthroughConverter` with the
+     * media discovery registries.
      *
      * PHP-DI autowires the constructors; explicit bindings here are
      * only for the cases where the host `App` cannot resolve the
