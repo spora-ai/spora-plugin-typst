@@ -149,6 +149,25 @@ final class TypstWorldFactory
     }
 
     /**
+     * Font + math-font defaults ext-typst can't auto-discover: without
+     * the `#show math.equation` line a bare `$…$` aborts with "no font
+     * could be found" even though `latinmodern-math.otf` ships with the
+     * plugin. The math show rule fires only on math blocks so it doesn't
+     * replace the document's own text-font choice.
+     */
+    public function prelude(): string
+    {
+        return "#set text(font: (\"Inter\", \"DejaVu Sans\", \"DejaVu Serif\"), lang: \"en\")\n"
+            . "#show math.equation: set text(font: (\"Latin Modern Math\", \"DejaVu Sans\"))\n";
+    }
+
+    /** Prepend {@see prelude()} so documents without an explicit font still render. */
+    public function wrapSource(string $source): string
+    {
+        return $this->prelude() . $source;
+    }
+
+    /**
      * Template dir is the principal's per-principal root. Both
      * `templates/` and `examples/` live under it, and images are
      * stored directly under it (no `images/` subdir) so

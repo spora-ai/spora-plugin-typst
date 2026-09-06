@@ -127,3 +127,39 @@ it('clamps the requested page number to the document\'s page count', function ()
     expect($output->mime)->toBe('image/png');
     expect(strlen($output->bytes))->toBeGreaterThan(50);
 });
+
+it('renders math blocks without an explicit math-font declaration', function () {
+    // ext-typst's auto-discovery doesn't pick latinmodern-math.otf up
+    // for math mode — a bare `$x = 1$` aborts with "no font could be
+    // found". The producer's prelude fills the gap.
+    //
+    // Single-quoted heredoc so PHP doesn't interpolate `$x = 1$` as
+    // variables.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-6';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = <<<'TYPST'
+= Math
+$x = 1$
+TYPST;
+
+    $output = $this->producer->produce($asset, 'pdf', []);
+    expect($output->mime)->toBe('application/pdf');
+    expect(strlen($output->bytes))->toBeGreaterThan(100);
+    expect($output->bytes[0])->toBe('%');  // PDF magic
+});
+
+it('honours a user-authored text font override despite the prelude', function () {
+    // Pins that a user-authored `#set text(font: …)` later in the file
+    // overrides the prelude without a fight.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-7';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = "#set text(font: \"DejaVu Sans\")\n= Hi\n";
+
+    $output = $this->producer->produce($asset, 'pdf', []);
+    expect($output->mime)->toBe('application/pdf');
+    expect(strlen($output->bytes))->toBeGreaterThan(100);
+});

@@ -5,6 +5,11 @@ declare(strict_types=1);
 use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Services\MediaArchive\MediaConverterInterface;
 
+/**
+ * Pin down the contract the converter exposes to the media archive
+ * registry: declares `text/x-typst` and the `typ` extension, returns
+ * the bytes as-is for `markdown_content`.
+ */
 it('declares the text/x-typst MIME and the typ extension', function (): void {
     $converter = new TypstSourcePassthroughConverter();
 
@@ -17,7 +22,6 @@ it('is wired as a MediaConverterInterface so the registry will pick it up', func
 });
 
 it('returns the bytes as-is for toMarkdown (Typst source is plain UTF-8 text)', function (): void {
-    // trim() is edge-only — inner content passes through verbatim.
     $bytes = "= Hello, world!\n\nThis is a Typst document.\n";
     $converter = new TypstSourcePassthroughConverter();
 

@@ -54,3 +54,21 @@ it('always returns at least the plugin-shipped font directory', function () {
     expect($realpathSkills)->not->toBeFalse();
     expect($dirs)->toContain($realpathSkills);
 });
+
+it('exposes a prelude that sets default text + math fonts', function () {
+    $prelude = $this->factory->prelude();
+    // Default text cascade: Inter if the principal uploaded it, then
+    // DejaVu Sans/Serif (Inter ships with the skill).
+    expect($prelude)->toContain('Inter');
+    expect($prelude)->toContain('DejaVu Sans');
+    // Math font fallback to Latin Modern Math (from the skill's fonts dir).
+    expect($prelude)->toContain('Latin Modern Math');
+    expect($prelude)->toContain('math.equation');
+});
+
+it('wraps user source with the prelude but keeps the user source byte-for-byte at the tail', function () {
+    $source = "= Hello\n\$x = 1$\n";
+    $wrapped = $this->factory->wrapSource($source);
+    expect($wrapped)->toStartWith('#set text(font:');
+    expect(substr($wrapped, -strlen($source)))->toBe($source);
+});

@@ -98,8 +98,8 @@ final class TypstPlugin extends AbstractPlugin
         // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-        // `text/x-typst` is plugin-supplied, so registration adds it to
-        // the upload allowlist.
+        // Idempotent — `MediaConverterDiscovery::add()` no-ops if the
+        // FQCN is already registered, so re-registration is safe.
         MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
