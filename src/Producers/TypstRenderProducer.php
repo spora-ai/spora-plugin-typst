@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Producers;
 
+use Closure;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
@@ -81,6 +82,10 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
 
     public function __construct(
         private readonly TypstWorldFactory $worldFactory,
+        // Test seam: returns the (world, compiler, inspector) stack
+        // directly so tests can stub the ext-typst-backed compile path.
+        // Production code leaves this null and uses the real factory.
+        private readonly ?Closure $stackFactory = null,
     ) {}
 
     public function pluginSlug(): string
@@ -124,7 +129,9 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         // constructor-time singleton, because the producer is
         // shared across principals via MediaDerivativeProducerDiscovery.
         $principalId = $source->principal_id !== null ? (int) $source->principal_id : null;
-        $stack = $this->worldFactory->build($principalId);
+        $stack = $this->stackFactory !== null
+            ? ($this->stackFactory)($principalId)
+            : $this->worldFactory->build($principalId);
 
         // Wrap with the factory's prelude so a document without an
         // explicit `#set text(font: …)` (or math-mode setup) still
