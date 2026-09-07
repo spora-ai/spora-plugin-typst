@@ -34,8 +34,6 @@ abstract class AbstractTypstTextResourceController
     public function __construct(
         protected readonly AuthService $auth,
         protected readonly PrincipalService $principals,
-        protected readonly TypstResourcePaths $paths,
-        protected readonly TypstResourceStore $store,
     ) {}
 
     /**

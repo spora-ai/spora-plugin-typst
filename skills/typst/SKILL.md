@@ -205,10 +205,10 @@ Three resource kinds, two tiers each:
 
 | Kind        | Purpose                                                 | Tier 1 (skill-shipped, read-only)             | Tier 2 (principal, writable)                  |
 |-------------|---------------------------------------------------------|----------------------------------------------|------------------------------------------------|
-| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter + DejaVu + Latin Modern Math) | `<storage>/typst/fonts/<principal>/`           |
-| `template`  | Full document skeletons the agent composes from data     | `<plugin>/skills/typst/templates/` (report)   | `<storage>/typst/templates/<principal>/`       |
-| `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<plugin>/skills/typst/examples/` (showcase) | `<storage>/typst/examples/<principal>/`        |
-| `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/images/<principal>/`         |
+| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter + DejaVu + Latin Modern Math) | `<storage>/typst/<principal>/fonts/`          |
+| `template`  | Full document skeletons the agent composes from data     | `<plugin>/skills/typst/templates/` (report)   | `<storage>/typst/<principal>/templates/`      |
+| `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<plugin>/skills/typst/examples/` (showcase) | `<storage>/typst/<principal>/examples/`       |
+| `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/<principal>/` (flat)          |
 
 Resources are listed with `typst_resources(action="resources_list", kind="<kind>")`.
 Uploads use `typst_resources(action="resources_write", kind="<kind>", name="...", content="...")`.
@@ -217,15 +217,16 @@ overrides the skill-shipped one for that principal only.
 
 The plugin's Typst world is built per principal with:
 
-- `template_dir: <storage>/typst/<principal>/` — so both `templates/`
-  and `examples/` are visible as siblings. Include with
-  `#include "templates/invoice.typ"` or `#include "examples/headings.typ"`.
+- `template_dir: <storage>/typst/<principal>/` — so `templates/`,
+  `examples/`, and uploaded images are all visible as siblings of the
+  principal root. Include with `#include "templates/report.typ"` or
+  `#include "examples/showcase.typ"`.
   Skill-shipped templates and examples are NOT auto-injected into
   the principal's `template_dir`; the operator lists them via
   `typst_resources` and pastes the basename explicitly when they
   want to use one.
 
-- `font_dirs: [<plugin>/skills/typst/fonts/, <storage>/typst/fonts/<principal>/]`
+- `font_dirs: [<plugin>/skills/typst/fonts/, <storage>/typst/<principal>/fonts/]`
   — Typst searches both. Reference by family name (`font: "Inter"`)
   with no URL.
 

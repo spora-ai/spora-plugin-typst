@@ -410,3 +410,98 @@ it('POST /typst/compile returns 422 PERSISTENCE_FAILED when the derivative servi
     expect($body['error']['code'])->toBe('PERSISTENCE_FAILED');
     expect($body['error']['message'])->toContain('failed to persist derivative');
 });
+
+it('POST /typst/compile returns 422 COMPILATION_FAILED with the sanitised message when the producer throws an InvalidArgumentException', function (): void {
+    $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
+    $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $producer->shouldReceive('operationName')->andReturn('typst.playground');
+    $producer->shouldReceive('produce')->andThrow(
+        new InvalidArgumentException('invalid typst option: foo'),
+    );
+
+    $controller = buildStubProducerController(
+        $this->auth,
+        $this->principalService,
+        $this->derivativeService,
+        $this->worldFactory,
+        $producer,
+    );
+
+    $req = Request::create(
+        COMPILE_PATH,
+        'POST',
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
+        content: json_encode(['source' => "= Hi\n", 'format' => 'pdf']),
+    );
+
+    $resp = $controller->compile($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+    // IAE/Runtime path uses the sanitised message verbatim (no "typst compile:" prefix).
+    expect($body['error']['message'])->toBe('invalid typst option: foo');
+});
+
+it('POST /typst/compile returns 422 COMPILATION_FAILED when the producer throws an unrelated RuntimeException', function (): void {
+    $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
+    $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $producer->shouldReceive('operationName')->andReturn('typst.playground');
+    $producer->shouldReceive('produce')->andThrow(
+        new RuntimeException('producer boom'),
+    );
+
+    $controller = buildStubProducerController(
+        $this->auth,
+        $this->principalService,
+        $this->derivativeService,
+        $this->worldFactory,
+        $producer,
+    );
+
+    $req = Request::create(
+        COMPILE_PATH,
+        'POST',
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
+        content: json_encode(['source' => "= Hi\n", 'format' => 'pdf']),
+    );
+
+    $resp = $controller->compile($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+    expect($body['error']['message'])->toBe('producer boom');
+});
+
+it('POST /typst/compile returns 422 COMPILATION_FAILED with the typst-compile prefix when the producer throws a non-Typst, non-Runtime exception', function (): void {
+    // A bare \LogicException isn't an InvalidArgumentException, RuntimeException,
+    // or TypstCompilationException, so produceErrorResponse falls through to
+    // the generic arm and prefixes the message with "typst compile:".
+    $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
+    $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $producer->shouldReceive('operationName')->andReturn('typst.playground');
+    $producer->shouldReceive('produce')->andThrow(
+        new LogicException('internal producer state inconsistency'),
+    );
+
+    $controller = buildStubProducerController(
+        $this->auth,
+        $this->principalService,
+        $this->derivativeService,
+        $this->worldFactory,
+        $producer,
+    );
+
+    $req = Request::create(
+        COMPILE_PATH,
+        'POST',
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
+        content: json_encode(['source' => "= Hi\n", 'format' => 'pdf']),
+    );
+
+    $resp = $controller->compile($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+    expect($body['error']['message'])->toStartWith('typst compile:');
+    expect($body['error']['message'])->toContain('internal producer state inconsistency');
+});

@@ -123,17 +123,22 @@ final class TypstResourceStore
      */
     public function read(string $kind, string $basename): ?string
     {
+        $this->validateBasename($basename);
         $tierTwo = $this->paths->tierTwoPath($kind, $basename);
         if (is_file($tierTwo)) {
-            $bytes = @file_get_contents($tierTwo);
-            return $bytes === false ? null : $bytes;
+            return $this->readOrNull($tierTwo);
         }
         $tierOne = $this->paths->tierOnePath($kind, $basename);
         if (is_file($tierOne)) {
-            $bytes = @file_get_contents($tierOne);
-            return $bytes === false ? null : $bytes;
+            return $this->readOrNull($tierOne);
         }
         return null;
+    }
+
+    private function readOrNull(string $path): ?string
+    {
+        $bytes = @file_get_contents($path);
+        return $bytes === false ? null : $bytes;
     }
 
     private function validateBasename(string $basename): void

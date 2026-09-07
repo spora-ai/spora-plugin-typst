@@ -12,9 +12,7 @@ use Spora\Auth\AuthService;
 use Spora\Http\JsonControllerHelpers;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
-use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
-use Spora\Plugins\Typst\Services\TypstFilename;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\MediaArchive\MediaArchiveService;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -67,10 +65,10 @@ final class TypstCompileController
 {
     use JsonControllerHelpers;
 
-    private const DEFAULT_NAME = 'playground.typ';
     private const STEP_PERSIST_SOURCE = 'persist_source';
     private const STEP_PRODUCE = 'produce';
     private const STEP_PERSIST_DERIVATIVE = 'persist_derivative';
+    private const TYPST_MIME_TYPE = 'text/x-typst';
 
     public function __construct(
         private readonly AuthService $auth,
@@ -88,7 +86,7 @@ final class TypstCompileController
     {
         try {
             $userId = $this->requireUserId();
-            $inputs = $this->parseCompileInputs($request);
+            $inputs = (new TypstCompileInputValidator())->parseCompileInputs($request);
             $producer = $this->findProducer();
             if ($producer === null) {
                 return $this->error(
@@ -110,53 +108,6 @@ final class TypstCompileController
             throw new CompileInputValidation($this->unauthenticated());
         }
         return (int) $userId;
-    }
-
-    /**
-     * Decode + validate the POST body. Returns the `CompileInputs`
-     * value object on success; throws {@see CompileInputValidation}
-     * (caught in {@see compile()}) on validation failure so this
-     * method only has one `return` and Sonar's S1142 stays silent.
-     */
-    private function parseCompileInputs(Request $request): CompileInputs
-    {
-        $body = $this->safeDecodeJson($request);
-        if ($body instanceof JsonResponse) {
-            throw new CompileInputValidation($body);
-        }
-
-        $source = $this->extractSource($body);
-        $name = $this->validateName($body['name'] ?? null);
-        $format = $this->extractFormat($body);
-        $page = isset($body['page']) ? max(0, (int) $body['page']) : null;
-        $dpi = isset($body['dpi']) ? max(36.0, min(600.0, (float) $body['dpi'])) : null;
-
-        return new CompileInputs($source, $name, $format, $page, $dpi);
-    }
-
-    private function extractSource(array $body): string
-    {
-        $source = $body['source'] ?? null;
-        if (!is_string($source) || trim($source) === '') {
-            throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', 'source is required and must be a non-empty string'),
-            );
-        }
-        return $source;
-    }
-
-    private function extractFormat(array $body): string
-    {
-        $format = strtolower(trim((string) ($body['format'] ?? 'pdf')));
-        if (!in_array($format, ['pdf', 'png', 'svg'], true)) {
-            throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', sprintf(
-                    'invalid format "%s" (expected: pdf, png, svg)',
-                    $format,
-                )),
-            );
-        }
-        return $format;
     }
 
     /**
@@ -247,35 +198,51 @@ final class TypstCompileController
      */
     private function pipelineErrorResponse(string $step, Throwable $e): JsonResponse
     {
-        // `CompileStepFailed` wraps the original `Throwable`; reach
-        // through to find the real exception type when matching.
-        $cause = $e->getPrevious() ?? $e;
         $sanitised = TypstDiagnosticFormatter::sanitise($e->getMessage());
-        return match ($step) {
-            self::STEP_PERSIST_SOURCE
-                => $this->unprocessable('VALIDATION_ERROR', 'failed to persist inline source: ' . $sanitised),
-            self::STEP_PRODUCE
-                => match (true) {
-                    $cause instanceof TypstCompilationException
-                        => $this->compilationFailureResponse($cause),
-                    $cause instanceof InvalidArgumentException || $cause instanceof RuntimeException
-                        => $this->unprocessable('COMPILATION_FAILED', $sanitised),
-                    default
-                    => $this->error(
-                        'COMPILATION_FAILED',
-                        'typst compile: ' . $sanitised,
-                        Response::HTTP_UNPROCESSABLE_ENTITY,
-                    ),
-                },
-            self::STEP_PERSIST_DERIVATIVE
-                => $this->error(
-                    'PERSISTENCE_FAILED',
-                    'failed to persist derivative: ' . $sanitised,
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                ),
-            default
-            => throw new LogicException("CompileStepFailed with unknown step: {$step}"),
-        };
+        if ($step === self::STEP_PERSIST_SOURCE) {
+            return $this->sourceErrorResponse($sanitised);
+        }
+        if ($step === self::STEP_PRODUCE) {
+            return $this->produceErrorResponse($e, $sanitised);
+        }
+        if ($step === self::STEP_PERSIST_DERIVATIVE) {
+            return $this->derivativeErrorResponse($sanitised);
+        }
+        throw new LogicException("CompileStepFailed with unknown step: {$step}");
+    }
+
+    private function sourceErrorResponse(string $sanitised): JsonResponse
+    {
+        return $this->unprocessable('VALIDATION_ERROR', 'failed to persist inline source: ' . $sanitised);
+    }
+
+    /**
+     * `CompileStepFailed` wraps the original `Throwable`; reach
+     * through to find the real exception type when matching.
+     */
+    private function produceErrorResponse(Throwable $e, string $sanitised): JsonResponse
+    {
+        $cause = $e->getPrevious() ?? $e;
+        if ($cause instanceof TypstCompilationException) {
+            return $this->compilationFailureResponse($cause);
+        }
+        if ($cause instanceof InvalidArgumentException || $cause instanceof RuntimeException) {
+            return $this->unprocessable('COMPILATION_FAILED', $sanitised);
+        }
+        return $this->error(
+            'COMPILATION_FAILED',
+            'typst compile: ' . $sanitised,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
+    }
+
+    private function derivativeErrorResponse(string $sanitised): JsonResponse
+    {
+        return $this->error(
+            'PERSISTENCE_FAILED',
+            'failed to persist derivative: ' . $sanitised,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
     }
 
     /**
@@ -355,31 +322,6 @@ final class TypstCompileController
     }
 
     /**
-     * Resolve the playground filename. Accepts null/empty (→ default),
-     * a plain basename, or a basename with the `.typ` suffix added if
-     * missing. Rejects anything that would escape the principal's
-     * directory (path traversal, control chars, NUL bytes).
-     *
-     * The actual regex / length rule lives in
-     * {@see TypstFilename::sanitise()} so this controller, the
-     * playground source controller, and the `typst_compile` tool
-     * share one definition.
-     *
-     * Throws {@see CompileInputValidation} on rejection so this
-     * method stays within Sonar's S1142 budget (≤ 3 returns).
-     */
-    private function validateName(mixed $raw): string
-    {
-        try {
-            return TypstFilename::sanitise($raw, self::DEFAULT_NAME);
-        } catch (TypstInvalidArgumentException $e) {
-            throw new CompileInputValidation(
-                $this->unprocessable('VALIDATION_ERROR', $e->getMessage()),
-            );
-        }
-    }
-
-    /**
      * Insert a fresh playground source row. Always INSERTs — the
      * previous `upsertInlineSource()` shape collapsed identical
      * filenames onto a single row, which made `playground.typ` a
@@ -403,7 +345,7 @@ final class TypstCompileController
         $asset->principal_id  = $principalId;
         $asset->plugin_slug   = 'spora-plugin-typst';
         $asset->tool_name     = 'typst.playground';
-        $asset->mime_type     = 'text/x-typst';
+        $asset->mime_type     = self::TYPST_MIME_TYPE;
         $asset->media_type    = MediaType::Document->value;
         $asset->byte_size     = strlen($source);
         $asset->filename      = $name;
@@ -466,47 +408,6 @@ final class TypstCompileController
         return vsprintf('%s%s-%s-%s-%s-%s%s%s', str_split(bin2hex($bytes), 4));
     }
 
-}
-
-/**
- * Validated inputs for {@see TypstCompileController::compile()}.
-
-/**
- * Validated inputs for {@see TypstCompileController::compile()}.
- *
- * Carries the sanitised scalars from the POST body so the
- * orchestrator can pass them around without re-validating or
- * re-decoding. Owned only by the controller's two private
- * helpers (`parseCompileInputs()`, `runCompile()`); callers
- * receive a JsonResponse, never this object.
- */
-final readonly class CompileInputs
-{
-    public function __construct(
-        public string $source,
-        public string $name,
-        public string $format,
-        public ?int $page,
-        public ?float $dpi,
-    ) {}
-}
-
-/**
- * Internal control-flow exception thrown by validation helpers in
- * {@see TypstCompileController} to unwind the request-parsing stack
- * without piling up `return $errorResponse` statements (which Sonar's
- * S1142 counts). Carries the {@see JsonResponse} the controller
- * would otherwise have returned inline; the top-level {@see
- * TypstCompileController::compile()} catches it and unwraps.
- *
- * Not thrown across request boundaries; never escapes the controller.
- */
-final class CompileInputValidation extends RuntimeException
-{
-    public function __construct(public readonly JsonResponse $response)
-    {
-        parent::__construct('compile input validation failed');
-    }
 }
 
 /**
