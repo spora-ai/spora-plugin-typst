@@ -20,10 +20,11 @@ beforeEach(function () {
 
     $this->principalService = new PrincipalService(new PrincipalResolver());
 
-    $this->tempDir = sys_get_temp_dir() . '/typst-template-ctrl-test-' . bin2hex(random_bytes(4));
-    mkdir($this->tempDir, 0o755, true);
-    mkdir($this->tempDir . '/storage', 0o755, true);
-    $this->paths = new Paths($this->tempDir);
+    // Mirror the controller's `paths()` resolution: it builds
+    // `new Paths(BASE_PATH)` per request, so the seeded store must
+    // resolve storage the same way or the controller and the
+    // test fixture write to disjoint roots.
+    $this->paths = new Paths(BASE_PATH);
 
     $this->resourcePaths = new TypstResourcePaths($this->paths, principalId: $this->principalService->ensureUserPrincipal($userId)->id);
     $this->resourceStore = new TypstResourceStore($this->resourcePaths);
@@ -31,31 +32,7 @@ beforeEach(function () {
     $this->controller = new TypstTemplateController(
         $this->auth,
         $this->principalService,
-        $this->resourcePaths,
-        $this->resourceStore,
     );
-});
-
-afterEach(function () {
-    clearSession();
-    foreach (['typst/fonts', 'typst/templates', 'typst/examples', 'typst/images', 'typst'] as $kindDir) {
-        $dir = $this->paths->storage($kindDir);
-        if (!is_dir($dir)) {
-            continue;
-        }
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST,
-        );
-        foreach ($iterator as $file) {
-            $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
-        }
-        @rmdir($dir);
-    }
-    if (is_dir($this->tempDir)) {
-        @rmdir($this->tempDir . '/storage');
-        @rmdir($this->tempDir);
-    }
 });
 
 afterEach(function () {
@@ -108,7 +85,7 @@ it('GET /typst/templates/{name} returns the source bytes', function () {
     expect($resp->getStatusCode())->toBe(200);
     expect((string) $resp->getContent())->toBe('= Letter content');
     expect($resp->headers->get('Content-Type'))->toContain('text/plain');
-})->skip(true, 'TODO: principal-scope coupling between seeded store and storeForCurrentUser()');
+});
 
 it('GET /typst/templates/{name} returns 404 for a missing template', function () {
     $req = Request::create('/api/v1/typst/templates/missing.typ', 'GET');
@@ -126,7 +103,7 @@ it('DELETE /typst/templates/{name} removes the file', function () {
     $resp = $this->controller->destroy($req);
     expect($resp->getStatusCode())->toBe(204);
     expect(is_file($this->resourcePaths->principalTemplateDirectory() . '/doomed.typ'))->toBeFalse();
-})->skip(true, 'TODO: principal-scope coupling');
+});
 
 it('POST /typst/templates validates the basename and content', function () {
     $req = Request::create(

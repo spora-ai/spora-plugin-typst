@@ -79,6 +79,8 @@ it('rejects traversal basenames', function () {
     foreach (['../escape', '/abs', 'sub/dir', '..', '.', ''] as $bad) {
         expect(fn() => $this->store->write(TypstResourcePaths::KIND_FONT, $bad, 'x'))
             ->toThrow(RuntimeException::class);
+        expect(fn() => $this->store->read(TypstResourcePaths::KIND_FONT, $bad))
+            ->toThrow(RuntimeException::class);
         expect(fn() => $this->store->delete(TypstResourcePaths::KIND_FONT, $bad))
             ->toThrow(RuntimeException::class);
     }

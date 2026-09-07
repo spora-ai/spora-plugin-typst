@@ -127,7 +127,6 @@ final class TypstImageController
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
         }
 
-        $this->principalIdForCurrentUser();
         return new JsonResponse([
             'data' => [
                 'image' => [

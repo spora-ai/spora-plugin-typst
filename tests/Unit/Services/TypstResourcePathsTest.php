@@ -57,11 +57,10 @@ it('returns skill-shipped resources even with no principal tier-2', function () 
 
     // Examples should be empty for the fresh-install case because
     // no principal has uploaded one and none ship with the plugin.
-    $examples = $this->resourcePaths->listBasenames(TypstResourcePaths::KIND_EXAMPLE);
-    // We also can't assume examples are empty — only that we get an
+    // We can't assume examples are empty — only that we get an
     // array. The negative test below uses a tmp directory that
     // definitely has no principal uploads.
-    expect($examples)->toBeArray();
+    expect($this->resourcePaths->listBasenames(TypstResourcePaths::KIND_EXAMPLE))->toBeArray();
 });
 
 it('lists skill-shipped resources from tier 1', function () {

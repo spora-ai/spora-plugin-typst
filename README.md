@@ -7,15 +7,16 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 ## What's in the box
 
 - 2 LLM-callable tools: `typst_compile` (renders + inspects) and `typst_resources` (font/template/example/image CRUD per kind).
-- 7 REST routes under `/api/v1/typst/{fonts,examples,images,compile}*`.
-- 1 admin app (`/apps/typst`) — manage fonts and example templates.
+- 22 REST routes under `/api/v1/typst/{fonts,templates,examples,images,compile,sources}*`.
+- 1 admin app (`/apps/typst`) — manage fonts, templates, examples, and images.
 - 1 agent template (`typst-assistant`).
 - The `typst` skill body — covers the workflow, syntax primer, and limit checklist.
-- Inter OFL (Regular + Bold) shipped under `skills/typst/fonts/` — always
-  available without an upload.
-- 1 starter Typst example (`skills/typst/examples/invoice.typ`).
+- Tier-1 fonts (Inter OFL + DejaVu Sans/Mono/Serif + Latin Modern Math) shipped under `skills/typst/fonts/` — always available without an upload.
+- 1 starter template (`skills/typst/templates/report.typ`) + 1 example (`skills/typst/examples/showcase.typ`).
 - A `TypstRenderProducer` that registers with `MediaDerivativeProducerDiscovery`
   so any admin surface can dispatch into it.
+- A `TypstSourcePassthroughConverter` registered with `MediaConverterDiscovery`
+  so `.typ` uploads are accepted (`text/x-typst` is added to the plugin-supplied allowlist).
 
 ## Architectural rule — **works without spora-plugin-media-archive**
 
@@ -44,7 +45,7 @@ require it.
 | --- | --- |
 | PHP | `^8.4.1` |
 | `ext-typst` | `*` ([Carthage Software](https://ext-typst.carthage.software/) — install via PECL or your distro's package manager) |
-| spora-core | `dev-main` — the plugin depends on `media_assets.principal_id` (migration 0075) and `media_derivatives` (0076), which are on `main` but not in the `v0.19.0` tag. Bump to a tagged release once the next spora-core tag ships those migrations. |
+| spora-core | `>=0.20.0` — the plugin depends on `media_assets.principal_id` (migration 0075) and `media_derivatives` (0076). |
 
 ## Bootstrap
 
@@ -54,13 +55,9 @@ vendor/bin/pest            # runs the plugin's Pest suite
 vendor/bin/phpstan analyse # PHPStan level 5
 ```
 
-The plugin's `composer.json` declares a `repositories` entry pointing at
-`https://github.com/spora-ai/spora-core.git` and requires the
-`feat/media-principal-coverage` branch by alias. That branch is the open
-PR that adds the `MediaDerivativeProducerInterface` + `MediaDerivativeService`
-this plugin builds on. Once that PR merges, the `[spora-ai/spora-core]`
-version in `composer.json` should be bumped to the next tagged release
-(`^0.19.0` or whichever ships the media-derivatives surface).
+The plugin's `composer.json` requires `spora-ai/spora-core >=0.20.0`. The
+`media_assets.principal_id` (migration 0075) and `media_derivatives` (0076)
+migrations ship in 0.20.0; earlier tags don't include them.
 
 ## Tests
 
@@ -132,8 +129,10 @@ All routes sit behind `AuthMiddleware` + `CsrfMiddleware`.
   resources.
 
 - **Tier 2 (principal, writable).** Stored under
-  `<storage>/typst/{fonts,examples}/<principal-id>/`. Tier-2 wins on
-  basename collision.
+  `<storage>/typst/<principal-id>/{fonts,templates,examples}/`. Images live
+  directly under `<storage>/typst/<principal-id>/` so `#image("basename.jpg")`
+  resolves against the same `template_dir` without an `images/` prefix.
+  Tier-2 wins on basename collision.
 
 Listing returns the union (deduplicated by basename, tier-2 first).
 Reads consult tier-2 first, then tier-1.
@@ -142,17 +141,15 @@ Reads consult tier-2 first, then tier-1.
 
 The plugin also ships a **per-principal image library** — agents can
 upload PNG / JPEG / WebP / SVG and reference them in Typst source via
-`#image("…/api/v1/assets/<uuid>.png")`. Each image is a real
-`media_assets` row tagged with `plugin_slug='spora-plugin-typst'` and
-`tool_name='typst.image'`, so it shows up in the media library's LIST
-endpoint and the Media Archive plugin's Versions UI when that plugin is
-also installed.
+`#image("/api/v1/typst/images/<basename>")`. Images live as plain files at
+`<storage>/typst/<principal>/<basename>` (not as `media_assets` rows) so the
+plugin's `/api/v1/typst/images/{basename}` URL stays stable across reinstalls.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/api/v1/typst/images` | List images visible to the caller (principal-scoped) |
 | `POST` | `/api/v1/typst/images` | Upload an image (`{ filename, mime, content }` — content is base64 or raw UTF-8 for SVG) |
-| `DELETE` | `/api/v1/typst/images/{id}` | Delete an image by id (404 if not found or owned by another principal) |
+| `DELETE` | `/api/v1/typst/images/{name}` | Delete an image by basename (404 if not found or owned by another principal) |
 
 Images are capped at `TypstImageStore::MAX_BYTES` (5 MiB) per upload and
 limited to the four MIMEs ext-typst can `#image()` natively. The
@@ -177,13 +174,11 @@ runs the same `TypstRenderProducer`, persists through
 `MediaDerivativeService::create()`, and returns the canonical asset
 URL.
 
-The `name` field is **required** for inline `source` — the LLM must
-pick a playground row name (`.typ` is auto-appended). Two compiles
-with the same `name` produce sibling rows with distinct UUIDs; the
-file picker surfaces both. Re-rendering the same parent refreshes
-derivatives in place via the `(parent_id, format, ...)` natural key,
-so no idempotency is lost. The `name` field is ignored when `file`
-is supplied.
+The `name` field is **optional** for inline `source` — when omitted, the
+tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` so the LLM
+doesn't need to invent a basename. The auto-name keeps the row findable
+in the playground picker. `.typ` is auto-appended when the supplied stem
+lacks it.
 For PDF it also produces a first-page PNG sibling so the UI can render
 an inline preview without a second round-trip.
 
@@ -265,26 +260,32 @@ plugin loader automatically.
 
 ```
 .
-├── composer.json          # spora-ai/spora-plugin-typst + ext-typst + spora-core@feat/media-principal-coverage
+├── composer.json          # spora-ai/spora-plugin-typst + ext-typst + spora-core >=0.20.0
 ├── plugin.json            # manifest (class=FQCN, slug=typst, icon=file-type-2)
 ├── src/
 │   ├── TypstPlugin.php                # entry point (register, routes, tools, apps)
 │   ├── TypstApp.php                   # admin-app metadata (name=typst, entry=main.js)
 │   ├── Exceptions/
-│   │   └── TypstCompilationException.php
+│   │   ├── TypstCompilationException.php    # ext-typst compile failure (+ diagnostics)
+│   │   ├── TypstInvalidArgumentException.php
+│   │   └── TypstRuntimeException.php
 │   ├── Http/
+│   │   ├── AbstractTypstTextResourceController.php # shared CRUD for templates + examples
 │   │   ├── TypstFontController.php             # GET/POST/DELETE /api/v1/typst/fonts
+│   │   ├── TypstTemplateController.php         # GET/POST/DELETE /api/v1/typst/templates
 │   │   ├── TypstExampleController.php          # GET/POST/DELETE /api/v1/typst/examples
 │   │   ├── TypstImageController.php            # GET/POST/DELETE /api/v1/typst/images
 │   │   ├── TypstCompileController.php          # POST /api/v1/typst/compile
-│   │   └── TypstPlaygroundSourceController.php # CRUD /api/v1/typst/sources
+│   │   ├── TypstPlaygroundSourceController.php # CRUD /api/v1/typst/sources
+│   │   └── TypstDiagnosticFormatter.php        # sanitises compiler diagnostics for the playground
 │   ├── Producers/
 │   │   └── TypstRenderProducer.php    # MediaDerivativeProducerInterface impl
 │   ├── Services/
 │   │   ├── TypstResourcePaths.php     # tier-1 + tier-2 path resolution
-│   │   ├── TypstResourceStore.php     # list/read/write/delete for tier-2
+│   │   ├── TypstResourceStore.php     # list/read/write/delete for tier-2 fonts/templates/examples
+│   │   ├── TypstImageStore.php        # filesystem-backed image library
 │   │   ├── TypstFilename.php          # shared basename validator (tool + controllers)
-│   │   └── TypstWorldFactory.php      # builds Typst\World + Compiler + Inspector
+│   │   └── TypstWorldFactory.php      # builds Typst\World + Compiler + Inspector + per-call prelude
 │   └── Tools/
 │       ├── AbstractTypstTool.php      # shared source-resolution + visibility
 │       ├── TypstCompileTool.php       # render / inspect

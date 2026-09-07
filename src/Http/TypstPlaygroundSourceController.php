@@ -425,7 +425,7 @@ final class TypstPlaygroundSourceController
     {
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
-        } catch (RuntimeException $e) {
+        } catch (TypstRuntimeException $e) {
             throw new PlaygroundRequestFailed(
                 $this->notFound('NOT_FOUND', $e->getMessage()),
             );
@@ -478,7 +478,7 @@ final class TypstPlaygroundSourceController
     {
         try {
             return $this->resolvePrincipalId($request, $userId);
-        } catch (RuntimeException $e) {
+        } catch (TypstRuntimeException $e) {
             throw new PlaygroundRequestFailed(
                 $this->notFound('NOT_FOUND', $e->getMessage()),
             );

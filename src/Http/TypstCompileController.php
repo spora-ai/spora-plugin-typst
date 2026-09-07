@@ -71,6 +71,7 @@ final class TypstCompileController
     private const STEP_PERSIST_SOURCE = 'persist_source';
     private const STEP_PRODUCE = 'produce';
     private const STEP_PERSIST_DERIVATIVE = 'persist_derivative';
+    private const TYPST_MIME_TYPE = 'text/x-typst';
 
     public function __construct(
         private readonly AuthService $auth,
@@ -247,35 +248,47 @@ final class TypstCompileController
      */
     private function pipelineErrorResponse(string $step, Throwable $e): JsonResponse
     {
-        // `CompileStepFailed` wraps the original `Throwable`; reach
-        // through to find the real exception type when matching.
-        $cause = $e->getPrevious() ?? $e;
         $sanitised = TypstDiagnosticFormatter::sanitise($e->getMessage());
         return match ($step) {
-            self::STEP_PERSIST_SOURCE
-                => $this->unprocessable('VALIDATION_ERROR', 'failed to persist inline source: ' . $sanitised),
-            self::STEP_PRODUCE
-                => match (true) {
-                    $cause instanceof TypstCompilationException
-                        => $this->compilationFailureResponse($cause),
-                    $cause instanceof InvalidArgumentException || $cause instanceof RuntimeException
-                        => $this->unprocessable('COMPILATION_FAILED', $sanitised),
-                    default
-                    => $this->error(
-                        'COMPILATION_FAILED',
-                        'typst compile: ' . $sanitised,
-                        Response::HTTP_UNPROCESSABLE_ENTITY,
-                    ),
-                },
-            self::STEP_PERSIST_DERIVATIVE
-                => $this->error(
-                    'PERSISTENCE_FAILED',
-                    'failed to persist derivative: ' . $sanitised,
-                    Response::HTTP_UNPROCESSABLE_ENTITY,
-                ),
-            default
-            => throw new LogicException("CompileStepFailed with unknown step: {$step}"),
+            self::STEP_PERSIST_SOURCE   => $this->sourceErrorResponse($sanitised),
+            self::STEP_PRODUCE          => $this->produceErrorResponse($e, $sanitised),
+            self::STEP_PERSIST_DERIVATIVE => $this->derivativeErrorResponse($sanitised),
+            default                     => throw new LogicException("CompileStepFailed with unknown step: {$step}"),
         };
+    }
+
+    private function sourceErrorResponse(string $sanitised): JsonResponse
+    {
+        return $this->unprocessable('VALIDATION_ERROR', 'failed to persist inline source: ' . $sanitised);
+    }
+
+    /**
+     * `CompileStepFailed` wraps the original `Throwable`; reach
+     * through to find the real exception type when matching.
+     */
+    private function produceErrorResponse(Throwable $e, string $sanitised): JsonResponse
+    {
+        $cause = $e->getPrevious() ?? $e;
+        if ($cause instanceof TypstCompilationException) {
+            return $this->compilationFailureResponse($cause);
+        }
+        if ($cause instanceof InvalidArgumentException || $cause instanceof RuntimeException) {
+            return $this->unprocessable('COMPILATION_FAILED', $sanitised);
+        }
+        return $this->error(
+            'COMPILATION_FAILED',
+            'typst compile: ' . $sanitised,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
+    }
+
+    private function derivativeErrorResponse(string $sanitised): JsonResponse
+    {
+        return $this->error(
+            'PERSISTENCE_FAILED',
+            'failed to persist derivative: ' . $sanitised,
+            Response::HTTP_UNPROCESSABLE_ENTITY,
+        );
     }
 
     /**
@@ -403,7 +416,7 @@ final class TypstCompileController
         $asset->principal_id  = $principalId;
         $asset->plugin_slug   = 'spora-plugin-typst';
         $asset->tool_name     = 'typst.playground';
-        $asset->mime_type     = 'text/x-typst';
+        $asset->mime_type     = self::TYPST_MIME_TYPE;
         $asset->media_type    = MediaType::Document->value;
         $asset->byte_size     = strlen($source);
         $asset->filename      = $name;
@@ -467,9 +480,6 @@ final class TypstCompileController
     }
 
 }
-
-/**
- * Validated inputs for {@see TypstCompileController::compile()}.
 
 /**
  * Validated inputs for {@see TypstCompileController::compile()}.
