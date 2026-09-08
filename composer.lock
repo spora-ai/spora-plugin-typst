@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "97db4b298f72e5d4f2d4b76ffd3464b1",
+    "content-hash": "e48cbfc30bd251e6c15a6cc87440d275",
     "packages": [
         {
             "name": "brick/math",
@@ -3136,6 +3136,38 @@
                 "source": "https://github.com/spora-ai/spora-core/tree/main"
             },
             "time": "2026-09-02T07:04:24+00:00"
+        },
+        {
+            "name": "spora-ai/spora-plugin-typst-frontend",
+            "version": "v0.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/spora-ai/spora-plugin-typst-frontend.git",
+                "reference": "2218e378adcfcc43f71ce429d730254d8f9f0b5b"
+            },
+            "dist": {
+                "type": "tar",
+                "url": "https://github.com/spora-ai/spora-plugin-typst-frontend/releases/download/v0.1.0/spora-plugin-typst-frontend-v0.1.0.tar.gz",
+                "reference": "2218e378adcfcc43f71ce429d730254d8f9f0b5b"
+            },
+            "require": {
+                "php": "^8.4.1"
+            },
+            "type": "spora-plugin-frontend",
+            "extra": {
+                "_comment": "Must equal plugin.json#slug in spora-plugin-typst; SporaPluginFrontendInstaller refuses to install when missing.",
+                "spora-plugin-slug": "typst"
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Pre-built Vue SPA for the Spora Typst admin panel. Delivered as type `spora-plugin-frontend`; the host SPA lazy-loads it via /plugins/spora-plugin-typst-frontend/main.js.",
+            "support": {
+                "issues": "https://github.com/spora-ai/spora-plugin-typst-frontend/issues",
+                "source": "https://github.com/spora-ai/spora-plugin-typst-frontend/tree/v0.1.0"
+            },
+            "time": "2026-09-07T19:03:15+00:00"
         },
         {
             "name": "symfony/clock",
