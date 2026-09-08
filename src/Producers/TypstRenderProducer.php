@@ -75,6 +75,32 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
     private const SUPPORTED_FORMATS = ['pdf', 'png', 'svg'];
 
     /**
+     * Curated PPI options surfaced to the operator UI as a `<select>`
+     * and recommended in the LLM tool's parameter description. The
+     * doubling progression matches CSS pixel-ratio steps (72 → 144 →
+     * 288) so the same source renders cleanly at any screen density;
+     * 600 is the upper clamp from the input validator (high-res print
+     * pre-press).
+     *
+     * ext-typst still accepts any positive DPI — this list is the
+     * UI-facing curation, not the wire-level validation. The compile
+     * input validator clamps to the wider 36..600 range so LLMs and
+     * power users can still request values between the predefined
+     * steps; the validator just doesn't reject them.
+     */
+    public const SUPPORTED_PPI = [72, 144, 288, 600];
+
+    /**
+     * Wire-level lower + upper bounds for the `ppi` parameter. Kept
+     * here alongside {@see SUPPORTED_PPI} so the producer stays the
+     * single source of truth for PNG resolution semantics — the input
+     * validator and the LLM tool both reference these constants.
+     */
+    public const MIN_PPI = 36.0;
+    public const MAX_PPI = 600.0;
+    public const DEFAULT_PPI = 144.0;
+
+    /**
      * MIME → file-extension map for the parent's local-branch read.
      * The parent's storage token filename is built by the ingest
      * pipeline from `MediaArchiveService::extensionForMime()`, which
@@ -173,7 +199,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
      * document passed in by a test fixture) wouldn't need to copy
      * the inspector-first logic.
      *
-     * `page` / `dpi` / `principalId` are extracted here because both
+     * `page` / `ppi` / `principalId` are extracted here because both
      * public surfaces normalise them from their respective sources
      * (`produce()` from the MediaAsset, `produceFromString()` from
      * the caller's argument list) before reaching this point.
@@ -253,7 +279,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
         $opts = new ImageOptions(
             format: ImageFormat::Png,
             quality: null,
-            dpi: isset($options['dpi']) ? max(36.0, min(600.0, (float) $options['dpi'])) : 144.0,
+            dpi: isset($options['ppi']) ? max(self::MIN_PPI, min(self::MAX_PPI, (float) $options['ppi'])) : self::DEFAULT_PPI,
         );
         $image = $document->toImage($page, $opts);
         return new DerivativeOutput(

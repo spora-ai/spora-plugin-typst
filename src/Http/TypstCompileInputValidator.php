@@ -6,6 +6,7 @@ namespace Spora\Plugins\Typst\Http;
 
 use Spora\Http\JsonControllerHelpers;
 use Spora\Plugins\Typst\Exceptions\TypstInvalidArgumentException;
+use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstFilename;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -48,9 +49,15 @@ final class TypstCompileInputValidator
      *     "source": "= Hello, Typst!\n",                // required, non-empty
      *     "name":   "letter.typ",                       // optional, defaults to DEFAULT_NAME
      *     "format": "pdf" | "png" | "svg",              // optional, defaults to pdf
-     *     "page":   0,                                  // optional, png only, clamped to ≥ 0
-     *     "dpi":    144                                 // optional, png only, clamped 36..600
+     *     "page":   0,                                  // optional, png/svg only, clamped to ≥ 0
+     *     "ppi":    144                                 // optional, png only, clamped 36..600
      *   }
+     *
+     * `ppi` accepts any positive number in the wire-level range — the
+     * operator UI's <select> surfaces the curated list at
+     * {@see TypstRenderProducer::SUPPORTED_PPI},
+     * but LLMs requesting intermediate values (e.g. 96 for a Windows
+     * screen default, 200 for a draft-quality proof) get through.
      */
     public function parseCompileInputs(Request $request): CompileInputs
     {
@@ -63,9 +70,9 @@ final class TypstCompileInputValidator
         $name = $this->validateName($body['name'] ?? null);
         $format = $this->extractFormat($body);
         $page = isset($body['page']) ? max(0, (int) $body['page']) : null;
-        $dpi = isset($body['dpi']) ? max(36.0, min(600.0, (float) $body['dpi'])) : null;
+        $ppi = isset($body['ppi']) ? max(TypstRenderProducer::MIN_PPI, min(TypstRenderProducer::MAX_PPI, (float) $body['ppi'])) : null;
 
-        return new CompileInputs($source, $name, $format, $page, $dpi);
+        return new CompileInputs($source, $name, $format, $page, $ppi);
     }
 
     /**

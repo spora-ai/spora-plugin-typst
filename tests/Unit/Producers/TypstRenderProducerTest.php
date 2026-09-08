@@ -70,7 +70,7 @@ it('compiles a simple typst source to PNG with width and height populated', func
     // explicit pagebreaks needed.
     $asset->payload = str_repeat("= Heading\nLorem ipsum dolor sit amet.\n\n", 50);
 
-    $output = $this->producer->produce($asset, 'png', ['page' => 0, 'dpi' => 96.0]);
+    $output = $this->producer->produce($asset, 'png', ['page' => 0, 'ppi' => 96.0]);
     expect($output->mime)->toBe('image/png');
     expect(strlen($output->bytes))->toBeGreaterThan(100);
     expect(substr($output->bytes, 0, 4))->toBe("\x89PNG");
@@ -123,7 +123,7 @@ it('clamps the requested page number to the document\'s page count', function ()
     $asset->storage_mode = 'data_url';
     $asset->payload = "= Only\n";
 
-    $output = $this->producer->produce($asset, 'png', ['page' => 99, 'dpi' => 72.0]);
+    $output = $this->producer->produce($asset, 'png', ['page' => 99, 'ppi' => 72.0]);
     expect($output->mime)->toBe('image/png');
     expect(strlen($output->bytes))->toBeGreaterThan(50);
 });

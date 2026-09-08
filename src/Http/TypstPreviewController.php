@@ -43,7 +43,7 @@ use Throwable;
  *     "name":   "letter.typ",                // optional, surfaced in error hints
  *     "format": "pdf" | "png" | "svg",       // optional, defaults to pdf
  *     "page":   0,                           // optional, png/svg only
- *     "dpi":    144                          // optional, png only
+ *     "ppi":    144                          // optional, png only
  *   }
  *
  * Response on success:
@@ -131,7 +131,7 @@ final class TypstPreviewController
                 principalId: $context->principalId > 0 ? $context->principalId : null,
                 options: array_filter([
                     'page' => $inputs->page,
-                    'dpi'  => $inputs->dpi,
+                    'ppi'  => $inputs->ppi,
                 ], static fn($v): bool => $v !== null),
             );
         } catch (Throwable $e) {

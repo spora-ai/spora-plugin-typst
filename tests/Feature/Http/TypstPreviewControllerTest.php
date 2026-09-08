@@ -97,7 +97,7 @@ it('POST /typst/preview returns base64 PNG bytes with width + height when ext-ty
     MediaDerivativeProducerDiscovery::reset();
     MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
 
-    $req = Request::create(PREVIEW_PATH, 'POST', server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME], content: json_encode(['source' => "= Hi\n", 'format' => 'png', 'dpi' => 144]));
+    $req = Request::create(PREVIEW_PATH, 'POST', server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME], content: json_encode(['source' => "= Hi\n", 'format' => 'png', 'ppi' => 144]));
     $resp = $this->controller->preview($req);
     expect($resp->getStatusCode())->toBe(200);
     $body = json_decode((string) $resp->getContent(), true);

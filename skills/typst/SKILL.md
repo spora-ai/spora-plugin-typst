@@ -82,9 +82,9 @@ For `png` and `svg`, `page` is 0-indexed. Out-of-range values are clamped to the
 
 For `pdf`, `page` is ignored — the entire document is rendered.
 
-## DPI parameter
+## PPI parameter
 
-Only meaningful for `png`. Default `144`. Range `36–600`. Lower DPI for thumbnails, higher for print.
+Only meaningful for `png`. Default `144`. Range `36–600`. The operator UI surfaces a curated list — `72`, `144`, `288`, `600` — matching CSS pixel-ratio steps and high-res print pre-press. LLMs may request any positive value in the wider range (e.g. `96` for Windows screen default, `200` for a draft-quality proof); the validator clamps rather than rejects. Use lower PPI for thumbnails, higher for print.
 
 ## Error handling
 
@@ -285,7 +285,7 @@ typst_compile(action: "inspect", source: "= ...\n#let x = 1\n#for i in range(1, 
 typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "pdf")
 
 // pass 3: grab the first page as a thumbnail
-typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "png", page: 0, dpi: 96)
+typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5) [= Page \\#i\n]\n", format: "png", page: 0, ppi: 144)
 ```
 
 ### Render from an uploaded .typ file

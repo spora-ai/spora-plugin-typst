@@ -45,7 +45,7 @@ use Throwable;
  * Usage from the LLM:
  *
  *   typst_compile(action: "render", source: "= Hello\n", format: "pdf")
- *   typst_compile(action: "render", file: "<media_uuid>", format: "png", page: 0, dpi: 200)
+ *   typst_compile(action: "render", file: "<media_uuid>", format: "png", page: 0, ppi: 200)
  *   typst_compile(action: "inspect", source: "= Hello\n")
  */
 #[Tool(
@@ -98,9 +98,9 @@ use Throwable;
     required: false,
 )]
 #[ToolParameter(
-    name: 'dpi',
+    name: 'ppi',
     type: 'number',
-    description: 'DPI for png output (36-600; default 144). Ignored when action=inspect, format=pdf, or format=svg.',
+    description: 'Pixels per inch for png output (36-600; default 144). The operator UI surfaces a curated list (72, 144, 288, 600) matching CSS pixel-ratio steps and high-res print; LLMs may request any value in the wire range. Ignored when action=inspect, format=pdf, or format=svg.',
     required: false,
 )]
 final class TypstCompileTool extends AbstractTypstTool
@@ -270,7 +270,7 @@ final class TypstCompileTool extends AbstractTypstTool
         ?PrincipalContext $context,
     ): MediaAsset {
         $page = isset($arguments['page']) ? max(0, (int) $arguments['page']) : null;
-        $dpi  = isset($arguments['dpi']) ? max(36.0, min(600.0, (float) $arguments['dpi'])) : null;
+        $ppi  = isset($arguments['ppi']) ? max(TypstRenderProducer::MIN_PPI, min(TypstRenderProducer::MAX_PPI, (float) $arguments['ppi'])) : null;
 
         try {
             $output = $producer->produce(
@@ -278,7 +278,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 format: $format,
                 options: array_filter([
                     'page' => $page,
-                    'dpi'  => $dpi,
+                    'ppi'  => $ppi,
                 ], static fn($v): bool => $v !== null),
             );
         } catch (TypstCompilationException $e) {
@@ -428,7 +428,7 @@ final class TypstCompileTool extends AbstractTypstTool
             return '';
         }
         try {
-            $png = $producer->produce($parent, 'png', ['page' => 0, 'dpi' => 144.0]);
+            $png = $producer->produce($parent, 'png', ['page' => 0, 'ppi' => TypstRenderProducer::DEFAULT_PPI]);
             $pngDerivative = $this->derivativeService->create(
                 parent: $parent,
                 output: $png,
