@@ -49,8 +49,13 @@ use Typst\ImageOptions;
  * which keys on `(parent_id, format, producer_plugin, producer_operation)`,
  * so re-rendering the same source overwrites the existing derivative
  * row rather than stacking duplicates.
+ *
+ * Also satisfies {@see TypstPreviewProducerInterface} so the Editor
+ * tab's `/preview` endpoint can reuse the same compile + render
+ * pipeline without going through a MediaAsset — see
+ * {@see produceFromString()} for the rationale.
  */
-final class TypstRenderProducer implements MediaDerivativeProducerInterface
+final class TypstRenderProducer implements MediaDerivativeProducerInterface, TypstPreviewProducerInterface
 {
     /**
      * Source formats the producer accepts. ext-typst has no registered
@@ -110,6 +115,44 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
 
     public function produce(MediaAsset $source, string $format, array $options = []): DerivativeOutput
     {
+        $format = $this->assertSupportedFormat($format);
+
+        return $this->compileAndRender(
+            bytes: $this->loadSourceBytes($source),
+            format: $format,
+            principalId: $source->principal_id !== null ? (int) $source->principal_id : null,
+            options: $options,
+        );
+    }
+
+    /**
+     * Ephemeral render surface for {@see \Spora\Plugins\Typst\Http\TypstPreviewController}.
+     * Skips the `MediaAsset` load path entirely — the preview endpoint
+     * never persists the source, so wrapping it in a MediaAsset row
+     * would be ceremony for the sake of an interface signature. Takes
+     * the principal id directly so the world factory can still scope
+     * `template_dir` / `font_dirs` to the caller's principal without a
+     * transient `media_assets` row.
+     *
+     * Same inspector-first discipline as {@see produce()}: throws
+     * {@see TypstCompilationException} on diagnostics errors so the
+     * preview controller's 422 path engages with the same envelope
+     * shape the {@see TypstCompileController} uses for `/compile`.
+     */
+    public function produceFromString(string $source, string $format, ?int $principalId, array $options = []): DerivativeOutput
+    {
+        $format = $this->assertSupportedFormat($format);
+
+        return $this->compileAndRender(
+            bytes: $source,
+            format: $format,
+            principalId: $principalId,
+            options: $options,
+        );
+    }
+
+    private function assertSupportedFormat(string $format): string
+    {
         $format = strtolower($format);
         if (!in_array($format, self::SUPPORTED_FORMATS, true)) {
             throw new TypstRuntimeException(sprintf(
@@ -118,17 +161,32 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
                 implode(', ', self::SUPPORTED_FORMATS),
             ));
         }
+        return $format;
+    }
 
-        $sourceBytes = $this->loadSourceBytes($source);
+    /**
+     * Shared compile → render pipeline for both {@see produce()} and
+     * {@see produceFromString()}. Splits the world-building,
+     * inspector, compile, and format-dispatch steps out of the public
+     * methods so the MediaAsset-shaped and string-shaped entry points
+     * stay symmetric — adding a third surface (e.g. an in-memory
+     * document passed in by a test fixture) wouldn't need to copy
+     * the inspector-first logic.
+     *
+     * `page` / `dpi` / `principalId` are extracted here because both
+     * public surfaces normalise them from their respective sources
+     * (`produce()` from the MediaAsset, `produceFromString()` from
+     * the caller's argument list) before reaching this point.
+     */
+    private function compileAndRender(string $bytes, string $format, ?int $principalId, array $options): DerivativeOutput
+    {
         $page = isset($options['page']) ? max(0, (int) $options['page']) : 0;
 
-        // Build a world configured for this source's principal so
-        // the per-principal template_dir / font_dirs / images are
-        // visible. The principal is sourced from the source
-        // MediaAsset (every render has one) rather than from a
-        // constructor-time singleton, because the producer is
-        // shared across principals via MediaDerivativeProducerDiscovery.
-        $principalId = $source->principal_id !== null ? (int) $source->principal_id : null;
+        // Build a world configured for the caller so the
+        // per-principal template_dir / font_dirs / images are
+        // visible. The producer is shared across principals via
+        // MediaDerivativeProducerDiscovery — the principal is passed
+        // per-call rather than at construction time.
         $stack = $this->stackFactory !== null
             ? ($this->stackFactory)($principalId)
             : $this->worldFactory->build($principalId);
@@ -137,7 +195,7 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
         // explicit `#set text(font: …)` (or math-mode setup) still
         // renders; user-authored set/show rules later in the file
         // override the prelude's defaults.
-        $wrapped = $this->worldFactory->wrapSource($sourceBytes);
+        $wrapped = $this->worldFactory->wrapSource($bytes);
 
         // Diagnostics-first: refuse to render when the inspector
         // reports errors. The producer is otherwise silent on
@@ -165,6 +223,14 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface
             'pdf' => $this->renderPdf($document),
             'png' => $this->renderPng($document, $page, $options),
             'svg' => $this->renderSvg($document, $page),
+            // Unreachable — {@see assertSupportedFormat()} gates
+            // every public entry point — but PHPStan needs an
+            // exhaustive match and throwing here surfaces a
+            // programmer error rather than silently dropping it.
+            default => throw new TypstRuntimeException(sprintf(
+                'TypstRenderProducer: format "%s" not handled by compileAndRender() — assertSupportedFormat() regression?',
+                $format,
+            )),
         };
     }
 
