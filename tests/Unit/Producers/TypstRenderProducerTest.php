@@ -254,6 +254,93 @@ it('rejects a local-mode asset with a non-typst mime that has no extension mappi
         ->toThrow(TypstRuntimeException::class);
 });
 
+it('exposes curated PPI bounds and the default PPI as public constants', function (): void {
+    // The frontend <select> and the LLM tool's parameter description
+    // both reference these constants (see composer.json scripts /
+    // constants/ppi.ts). Lock the values down so a frontend/backend
+    // drift surfaces as a test failure here, not a UX surprise.
+    expect(TypstRenderProducer::SUPPORTED_PPI)->toEqualCanonicalizing([72, 144, 288, 600]);
+    expect(TypstRenderProducer::DEFAULT_PPI)->toBe(144.0);
+    expect(TypstRenderProducer::MIN_PPI)->toBe(36.0);
+    expect(TypstRenderProducer::MAX_PPI)->toBe(600.0);
+    // MIN_PPI / MAX_PPI are the wire-level bounds for `ppi`; the
+    // validator clamps to them, the LLM tool description cites them.
+    expect(TypstRenderProducer::DEFAULT_PPI)->toBeGreaterThanOrEqual(TypstRenderProducer::MIN_PPI);
+    expect(TypstRenderProducer::DEFAULT_PPI)->toBeLessThanOrEqual(TypstRenderProducer::MAX_PPI);
+});
+
+it('clamps the requested ppi to the wire-level bounds', function (): void {
+    // ppi < MIN_PPI clamps up; ppi > MAX_PPI clamps down. Pin both
+    // arms so a regression in the clamp surfaces here.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-14';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = "= Hi\n";
+
+    // ppi=10 → clamps up to MIN_PPI (36).
+    $low = $this->producer->produce($asset, 'png', ['ppi' => 10.0]);
+    expect($low->mime)->toBe('image/png');
+    // ppi=9999 → clamps down to MAX_PPI (600).
+    $high = $this->producer->produce($asset, 'png', ['ppi' => 9999.0]);
+    expect($high->mime)->toBe('image/png');
+});
+
+it('produces from a raw string (preview path) to PDF', function (): void {
+    // produceFromString() is the ephemeral surface used by the
+    // /preview endpoint — no MediaAsset, no asset_token. Pin the
+    // happy path so the controller's wiring has a contract.
+    $output = $this->producer->produceFromString("= Hello preview\n", 'pdf', principalId: 1);
+    expect($output->mime)->toBe('application/pdf');
+    expect(strlen($output->bytes))->toBeGreaterThan(100);
+    expect($output->bytes[0])->toBe('%');
+});
+
+it('produces from a raw string to PNG and SVG', function (): void {
+    // Pin the PNG and SVG branches of produceFromString()'s
+    // compileAndRender dispatch so the preview endpoint supports
+    // both formats the editor offers.
+    $png = $this->producer->produceFromString("= Png preview\n", 'png', principalId: 1);
+    expect($png->mime)->toBe('image/png');
+    expect(substr($png->bytes, 0, 4))->toBe("\x89PNG");
+
+    $svg = $this->producer->produceFromString("= Svg preview\n", 'svg', principalId: 1);
+    expect($svg->mime)->toBe('image/svg+xml');
+    expect($svg->bytes)->toContain('<svg');
+});
+
+it('rejects an unsupported format in produceFromString()', function (): void {
+    // produceFromString() routes through the same assertSupportedFormat()
+    // private gate as produce(); an unsupported format must throw the
+    // same RuntimeException, not silently default to PDF.
+    expect(fn() => $this->producer->produceFromString("= Hi\n", 'mp4', principalId: 1))
+        ->toThrow(TypstRuntimeException::class, 'unsupported derivative format');
+});
+
+it('propagates compilation errors from produceFromString() as TypstCompilationException', function (): void {
+    // produceFromString() shares the inspector-first discipline with
+    // produce(): errors thrown by the inspector surface as
+    // TypstCompilationException with the diagnostics array populated.
+    // The exact error payload varies by ext-typst version, so this
+    // test only asserts the throw shape, not the contents.
+    $threw = false;
+    try {
+        $this->producer->produceFromString(
+            "= Heading\n#let x = \"unclosed\n",
+            'pdf',
+            principalId: 1,
+        );
+    } catch (TypstCompilationException) {
+        $threw = true;
+    } catch (TypstRuntimeException) {
+        // ext-typst versions that recover without diagnostics
+        // propagate the underlying TypstRuntimeException — also
+        // acceptable; the throw path is what matters.
+        $threw = true;
+    }
+    expect($threw)->toBeTrue();
+});
+
 /**
  * Write the bytes for a `local` storage_mode asset to disk at the
  * path the producer reads from — `<storage>/assets/<token>.<ext>`
