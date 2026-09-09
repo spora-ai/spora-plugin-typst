@@ -179,7 +179,7 @@ final class TypstPreviewController
      */
     private function buildPayload(\Spora\Services\MediaArchive\DerivativeOutput $output, string $sourceName): array
     {
-        $payload = [
+        return [
             'bytes'       => base64_encode($output->bytes),
             'mime'        => $output->mime,
             'format'      => $this->formatForMime($output->mime),
@@ -187,7 +187,6 @@ final class TypstPreviewController
             'width'       => $output->width,
             'height'      => $output->height,
         ];
-        return $payload;
     }
 
     /**

@@ -186,19 +186,18 @@ final class TypstDiagnosticFormatter
         // alone won't resolve. Direct the operator to the right
         // prefix.
         if (str_contains($message, '(file not found)')) {
-            return 'Imports in the Editor compile from the principal root; uploaded templates live under "templates/" and examples under "examples/". Use #import "templates/foo.typ" or #include "examples/bar.typ" — upload via the Templates or Examples tab.';
+            $hint = 'Imports in the Editor compile from the principal root; uploaded templates live under "templates/" and examples under "examples/". Use #import "templates/foo.typ" or #include "examples/bar.typ" — upload via the Templates or Examples tab.';
+        } elseif (str_contains($message, 'no font could be found')) {
+            // The operator referenced a font by name that the bundled
+            // + principal-tier `font_dirs` don't contain.
+            $hint = 'Upload the font via the Fonts tab, or reference one of the bundled fonts (Inter, DejaVu Sans, Latin Modern Math) by its basename.';
+        } elseif (preg_match('/\bunknown variable\b/', $message) === 1) {
+            // Most often a typo in a function name or a missing
+            // import.
+            $hint = 'Check the spelling, or add the missing #import at the top of the source.';
+        } else {
+            $hint = null;
         }
-        // "no font could be found" — the operator referenced a font
-        // by name that the bundled + principal-tier `font_dirs`
-        // don't contain.
-        if (str_contains($message, 'no font could be found')) {
-            return 'Upload the font via the Fonts tab, or reference one of the bundled fonts (Inter, DejaVu Sans, Latin Modern Math) by its basename.';
-        }
-        // "unknown variable" — most often a typo in a function name
-        // or a missing import.
-        if (preg_match('/\bunknown variable\b/', $message) === 1) {
-            return 'Check the spelling, or add the missing #import at the top of the source.';
-        }
-        return null;
+        return $hint;
     }
 }

@@ -66,6 +66,8 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 final class TypstPlugin extends AbstractPlugin
 {
     private const SOURCES_ROUTE_PATTERN = '/api/v1/typst/sources/{id}';
+    private const TEMPLATES_ROUTE_PATTERN = '/api/v1/typst/templates/{name}';
+    private const EXAMPLES_ROUTE_PATTERN = '/api/v1/typst/examples/{name}';
 
     public function getName(): string
     {
@@ -122,17 +124,17 @@ final class TypstPlugin extends AbstractPlugin
 
         // Templates (full document skeletons)
         $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'show'], $auth);
+        $r->addRoute('GET', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'show'], $auth);
         $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], $auth);
-        $r->addRoute('PUT', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'update'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'destroy'], $auth);
+        $r->addRoute('PUT', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'update'], $auth);
+        $r->addRoute('DELETE', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'destroy'], $auth);
 
         // Examples (small pattern snippets — separate kind, separate URL prefix)
         $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], $auth);
+        $r->addRoute('GET', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'show'], $auth);
         $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], $auth);
-        $r->addRoute('PUT', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'update'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], $auth);
+        $r->addRoute('PUT', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'update'], $auth);
+        $r->addRoute('DELETE', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'destroy'], $auth);
 
         // Images — the basename (not a row id) is the addressable key.
         $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], $auth);
