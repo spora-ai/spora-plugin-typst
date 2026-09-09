@@ -196,6 +196,74 @@ it('POST /typst/preview surfaces the source_name back to the caller', function (
     expect(json_decode((string) $resp->getContent(), true)['data']['source_name'])->toBe('card.typ');
 });
 
+it('POST /typst/preview returns 422 + sanitised message for a non-Typst RuntimeException', function (): void {
+    // The producer may surface non-typst exceptions (asset_token
+    // missing, storage_mode unknown, etc.). The controller must
+    // surface them as 422 COMPILATION_FAILED with the message
+    // sanitised through TypstDiagnosticFormatter::sanitise — and
+    // NOT wrap them as TypstCompilationException, because the
+    // generic catch-all arm in runPreview() handles them.
+    $producer = Mockery::mock(TypstPreviewProducerInterface::class);
+    $producer->shouldReceive('produceFromString')
+        ->andThrow(new RuntimeException('cannot open /Users/alice/main.typ'));
+
+    $controller = new TypstPreviewController(
+        $this->auth,
+        $this->principalService,
+        $this->worldFactory,
+        producerFactory: static fn(): TypstPreviewProducerInterface => $producer,
+    );
+
+    $req = Request::create(PREVIEW_PATH, 'POST', server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME], content: json_encode(['source' => '= Hi', 'format' => 'pdf']));
+    $resp = $controller->preview($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+    expect($body['error']['message'])->not->toContain('/Users/alice');
+});
+
+it('POST /typst/preview throws LogicException when the producer factory returns the wrong type', function (): void {
+    // The producerFactory contract is "return TypstPreviewProducerInterface";
+    // a misconfigured factory returning a non-conforming instance
+    // must fail loud (LogicException), not silently swallow the
+    // mismatch.
+    $controller = new TypstPreviewController(
+        $this->auth,
+        $this->principalService,
+        $this->worldFactory,
+        producerFactory: static fn(): object => new stdClass(),
+    );
+
+    $req = Request::create(PREVIEW_PATH, 'POST', server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME], content: json_encode(['source' => '= Hi', 'format' => 'pdf']));
+    expect(fn() => $controller->preview($req))
+        ->toThrow(LogicException::class);
+});
+
+it('POST /typst/preview returns 422 + sanitised message for a non-Typst, non-Runtime exception', function (): void {
+    // The producer may throw unexpected exception types (e.g. an
+    // ext-typst internal error that's wrapped as TypeError). The
+    // controller must catch the generic Throwable arm and surface
+    // it as 422 COMPILATION_FAILED with the message sanitised
+    // through TypstDiagnosticFormatter::sanitise.
+    $producer = Mockery::mock(TypstPreviewProducerInterface::class);
+    $producer->shouldReceive('produceFromString')
+        ->andThrow(new TypeError('cannot open /Users/alice/main.typ'));
+
+    $controller = new TypstPreviewController(
+        $this->auth,
+        $this->principalService,
+        $this->worldFactory,
+        producerFactory: static fn(): TypstPreviewProducerInterface => $producer,
+    );
+
+    $req = Request::create(PREVIEW_PATH, 'POST', server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME], content: json_encode(['source' => '= Hi', 'format' => 'pdf']));
+    $resp = $controller->preview($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('COMPILATION_FAILED');
+    expect($body['error']['message'])->not->toContain('/Users/alice');
+});
+
 it('POST /typst/preview returns 503 when no producer is registered', function () {
     MediaDerivativeProducerDiscovery::reset();
 
