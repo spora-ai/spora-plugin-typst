@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Spora\Core\MiddlewareRouteCollector;
+use Spora\Events\ContainerBuildingEvent;
+use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
@@ -19,10 +21,11 @@ use Spora\Plugins\Typst\TypstApp;
 use Spora\Plugins\Typst\TypstPlugin;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Symfony\Component\EventDispatcher\EventDispatcher;
 
 /**
- * Verifies the wiring of {@see TypstPlugin}'s `register()`,
- * `routes()`, `apps()`, `tools()`, `skillPaths()`, and
+ * Verifies the wiring of {@see TypstPlugin}'s subscriber listeners,
+ * plus the unchanged `apps()`, `tools()`, `skillPaths()`, and
  * `agentTemplatePaths()` hooks.
  *
  * Coverage target: the route registration block (the biggest source
@@ -35,7 +38,9 @@ beforeEach(function () {
     MediaDerivativeProducerDiscovery::reset();
     MediaConverterDiscovery::reset();
 
-    $this->plugin = new TypstPlugin();
+    $this->plugin     = new TypstPlugin();
+    $this->dispatcher = new EventDispatcher();
+    $this->dispatcher->addSubscriber($this->plugin);
 });
 
 afterEach(function () {
@@ -47,25 +52,32 @@ it('reports the spora-plugin-typst name from the registered TypstApp', function 
     expect($this->plugin->getName())->toBe((new TypstApp())->displayName());
 });
 
-it('registers TypstRenderProducer with the media-derivatives discovery at boot', function () {
+it('subscribes to ContainerBuildingEvent and RoutesRegisteringEvent', function () {
+    expect(TypstPlugin::getSubscribedEvents())->toBe([
+        ContainerBuildingEvent::class => 'onContainerBuilding',
+        RoutesRegisteringEvent::class => 'onRoutesRegistering',
+    ]);
+});
+
+it('registers TypstRenderProducer with the media-derivatives discovery on container build', function () {
     $builder = new DI\ContainerBuilder();
-    $this->plugin->register($builder);
+    $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
 
     expect(MediaDerivativeProducerDiscovery::all())->toContain(TypstRenderProducer::class);
 });
 
-it('registers TypstSourcePassthroughConverter with the media-converter discovery at boot', function () {
+it('registers TypstSourcePassthroughConverter with the media-converter discovery on container build', function () {
     // `text/x-typst` isn't in core's TEXT_MIME_TYPES — without this
     // registration `.typ` uploads fail with 415.
     $builder = new DI\ContainerBuilder();
-    $this->plugin->register($builder);
+    $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
 
     expect(MediaConverterDiscovery::all())->toContain(TypstSourcePassthroughConverter::class);
 });
 
 it('registers every controller and tool FQCN as a PHP-DI autowire definition', function () {
     $builder = new DI\ContainerBuilder();
-    $this->plugin->register($builder);
+    $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
 
     $container = $builder->build();
     $expected = [
@@ -107,9 +119,9 @@ it('exposes the plugin-local agent-templates directory under agentTemplatePaths(
 });
 
 it('registers the nine /api/v1/typst/* routes with auth + csrf protection', function () {
-    // The plugin's routes() method accepts a MiddlewareRouteCollector
-    // (final). Spin up a real collector with FastRoute's standard
-    // parser/data-generator, register the plugin's routes on it,
+    // The plugin's onRoutesRegistering() listener accepts a
+    // MiddlewareRouteCollector (final). Spin up a real collector with
+    // FastRoute's standard parser/data-generator, dispatch the event,
     // and inspect the registered routes by reflecting on the
     // data-generator's protected `staticRoutes` table.
     $dataGenerator = new FastRoute\DataGenerator\GroupCountBased();
@@ -117,7 +129,7 @@ it('registers the nine /api/v1/typst/* routes with auth + csrf protection', func
         new FastRoute\RouteParser\Std(),
         $dataGenerator,
     );
-    $this->plugin->routes($recorder);
+    $this->dispatcher->dispatch(new RoutesRegisteringEvent($recorder));
 
     $reflection = new ReflectionObject($dataGenerator);
     $staticRoutes = $reflection->getProperty('staticRoutes')->getValue($dataGenerator);

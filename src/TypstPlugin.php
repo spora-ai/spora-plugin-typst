@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst;
 
-use DI\ContainerBuilder;
-use Spora\Core\MiddlewareRouteCollector;
+use Spora\Events\ContainerBuildingEvent;
+use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
@@ -21,6 +21,7 @@ use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
+use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
 /**
  * Plugin entry point for `spora-plugin-typst`.
@@ -62,28 +63,40 @@ use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
  *     them, so the operator can shadow a skill-shipped file by
  *     uploading one of the same name under their principal.
  */
-final class TypstPlugin extends AbstractPlugin
+final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterface
 {
+    private const AUTH                  = [AuthMiddleware::class, CsrfMiddleware::class];
     private const SOURCES_ROUTE_PATTERN = '/api/v1/typst/sources/{id}';
 
-    public function getName(): string
+    /**
+     * Subscribes to the two spora-core lifecycle events that replace
+     * the deprecated `register()` / `routes()` hooks. The container
+     * event fires once per process (DI bindings + idempotent
+     * media-archive discovery re-registration); the routes event
+     * fires per request.
+     */
+    public static function getSubscribedEvents(): array
     {
-        return (new TypstApp())->displayName();
+        return [
+            ContainerBuildingEvent::class => 'onContainerBuilding',
+            RoutesRegisteringEvent::class => 'onRoutesRegistering',
+        ];
     }
 
     /**
-     * Wire DI bindings for the controllers + tools, and register the
-     * `TypstRenderProducer` and `TypstSourcePassthroughConverter` with the
-     * media discovery registries.
+     * Wire DI bindings for the controllers + tools, and (idempotently)
+     * register the `TypstRenderProducer` and
+     * `TypstSourcePassthroughConverter` with the media discovery
+     * registries.
      *
-     * PHP-DI autowires the constructors; explicit bindings here are
-     * only for the cases where the host `App` cannot resolve the
-     * type (controllers with multi-dep ctor, the resource store
-     * which depends on a principal-id parameter).
+     * Discovery calls run on every boot by design — the registries are
+     * in-process statics that reset between tests, and the discovery
+     * classes no-op when the FQCN is already registered, so repeated
+     * registration is harmless.
      */
-    public function register(ContainerBuilder $builder): void
+    public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
-        $builder->addDefinitions([
+        $event->builder()->addDefinitions([
             TypstFontController::class             => \DI\autowire(),
             TypstTemplateController::class         => \DI\autowire(),
             TypstExampleController::class          => \DI\autowire(),
@@ -94,12 +107,7 @@ final class TypstPlugin extends AbstractPlugin
             TypstResourcesTool::class              => \DI\autowire(),
         ]);
 
-        // Idempotent — `MediaDerivativeProducerDiscovery::add()` no-ops
-        // if the FQCN is already in the registry.
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
-
-        // Idempotent — `MediaConverterDiscovery::add()` no-ops if the
-        // FQCN is already registered, so re-registration is safe.
         MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
@@ -108,36 +116,36 @@ final class TypstPlugin extends AbstractPlugin
      * Mirrors the spora-plugin-memories auth chain verbatim so the
      * admin UI's fetch() calls Just Work.
      */
-    public function routes(MiddlewareRouteCollector $r): void
+    public function onRoutesRegistering(RoutesRegisteringEvent $event): void
     {
-        $auth = [AuthMiddleware::class, CsrfMiddleware::class];
+        $r = $event->routes();
 
         // Fonts
-        $r->addRoute('GET', '/api/v1/typst/fonts', [TypstFontController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'show'], $auth);
-        $r->addRoute('POST', '/api/v1/typst/fonts', [TypstFontController::class, 'store'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'destroy'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/fonts', [TypstFontController::class, 'index'], self::AUTH);
+        $r->addRoute('GET', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'show'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/fonts', [TypstFontController::class, 'store'], self::AUTH);
+        $r->addRoute('DELETE', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'destroy'], self::AUTH);
 
         // Templates (full document skeletons)
-        $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'show'], $auth);
-        $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'destroy'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], self::AUTH);
+        $r->addRoute('GET', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'show'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], self::AUTH);
+        $r->addRoute('DELETE', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'destroy'], self::AUTH);
 
         // Examples (small pattern snippets — separate kind, separate URL prefix)
-        $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], $auth);
-        $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], self::AUTH);
+        $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], self::AUTH);
+        $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], self::AUTH);
 
         // Images — the basename (not a row id) is the addressable key.
-        $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], $auth);
-        $r->addRoute('GET', '/api/v1/typst/images/{name}', [TypstImageController::class, 'show'], $auth);
-        $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], $auth);
-        $r->addRoute('DELETE', '/api/v1/typst/images/{name}', [TypstImageController::class, 'destroy'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], self::AUTH);
+        $r->addRoute('GET', '/api/v1/typst/images/{name}', [TypstImageController::class, 'show'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], self::AUTH);
+        $r->addRoute('DELETE', '/api/v1/typst/images/{name}', [TypstImageController::class, 'destroy'], self::AUTH);
 
         // Playground — compile inline Typst source to PDF/PNG/SVG.
-        $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], $auth);
+        $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], self::AUTH);
 
         // Playground source files — list/open/create/save/delete the
         // .typ rows the compile endpoint materialises. The compile
@@ -145,11 +153,16 @@ final class TypstPlugin extends AbstractPlugin
         // filename); this controller surfaces the rest of the
         // lifecycle (create without rendering, open, edit, delete)
         // for the operator UI.
-        $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], $auth);
-        $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], $auth);
-        $r->addRoute('GET', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'show'], $auth);
-        $r->addRoute('PUT', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'update'], $auth);
-        $r->addRoute('DELETE', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'destroy'], $auth);
+        $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], self::AUTH);
+        $r->addRoute('GET', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'show'], self::AUTH);
+        $r->addRoute('PUT', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'update'], self::AUTH);
+        $r->addRoute('DELETE', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'destroy'], self::AUTH);
+    }
+
+    public function getName(): string
+    {
+        return (new TypstApp())->displayName();
     }
 
     /**
