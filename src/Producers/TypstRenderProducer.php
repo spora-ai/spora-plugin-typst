@@ -318,7 +318,11 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
 
     private function loadSourceBytes(MediaAsset $asset): string
     {
-        $bytes = match ($asset->storage_mode) {
+        // Both readDataUrlBytes() and readLocalBytes() throw on empty
+        // payloads before returning, so the match arms always yield
+        // non-empty strings when we reach `return` — no outer empty
+        // guard needed (and no test can reach one).
+        return match ($asset->storage_mode) {
             'data_url' => $this->readDataUrlBytes($asset),
             'local'    => $this->readLocalBytes($asset),
             default    => throw new TypstRuntimeException(sprintf(
@@ -326,13 +330,6 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
                 (string) $asset->storage_mode,
             )),
         };
-        if ($bytes === '') {
-            throw new TypstRuntimeException(sprintf(
-                'TypstRenderProducer: MediaAsset %s has empty source bytes',
-                $asset->id,
-            ));
-        }
-        return $bytes;
     }
 
     private function readDataUrlBytes(MediaAsset $asset): string

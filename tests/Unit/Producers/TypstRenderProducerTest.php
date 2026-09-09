@@ -341,6 +341,73 @@ it('propagates compilation errors from produceFromString() as TypstCompilationEx
     expect($threw)->toBeTrue();
 });
 
+it('summariseDiagnostics() formats the empty-diagnostics case with a clear message', function (): void {
+    // The empty-diagnostics arm is reachable when ext-typst's
+    // inspector reports zero diagnostics but compile() still fails
+    // (e.g. an internal crash). Pin the message so an operator
+    // looking at a "no document" failure can tell apart the empty
+    // case from the non-empty case.
+    $ref = new ReflectionMethod(TypstRenderProducer::class, 'summariseDiagnostics');
+    $ref->setAccessible(true);
+    expect($ref->invoke($this->producer, []))
+        ->toBe('TypstRenderProducer: compilation produced no document');
+});
+
+it('summariseDiagnostics() skips non-Error severities and falls back when none remain', function (): void {
+    // Real ext-typst usually only emits Severity::Error, but the
+    // producer is defensive: it skips Warning / Hint diagnostics in
+    // the summary and, if nothing remains, returns a generic
+    // "compilation produced errors" message instead of an empty
+    // string. Pin both arms — these branches are otherwise
+    // unreachable from the public produce() / produceFromString()
+    // surfaces because the producer's own diagnostic filter only
+    // forwards Severity::Error diagnostics to the throw path.
+    //
+    // `Typst\Diagnostic\Diagnostic` is `final`, so we can't extend
+    // it directly. Use a duck-typed anonymous class.
+    $warningDiag = new class {
+        public function severity(): Typst\Diagnostic\Severity
+        {
+            return Typst\Diagnostic\Severity::Warning;
+        }
+        public function message(): string
+        {
+            return 'this is a warning';
+        }
+        public function hints(): array
+        {
+            return [];
+        }
+    };
+    $ref = new ReflectionMethod(TypstRenderProducer::class, 'summariseDiagnostics');
+    $ref->setAccessible(true);
+    expect($ref->invoke($this->producer, [$warningDiag]))
+        ->toBe('TypstRenderProducer: compilation produced errors (see diagnostics)');
+});
+
+it('clampPage() throws when the document has zero pages', function (): void {
+    // The compileAndRender() pipeline calls clampPage() right after
+    // a successful compile, so a zero-page document would normally
+    // never reach the renderer. ext-typst can produce one in edge
+    // cases (e.g. an empty page after `#set page(width: 0pt)`),
+    // and the producer must surface that as a compilation error
+    // rather than passing a bogus page index to toPng().
+    //
+    // \Typst\Document is final, so we can't extend it. Skip on
+    // builds where we can't construct a Document whose pageCount()
+    // reports 0 directly — the test is meaningful on dev builds
+    // where ext-typst exposes the constructor, not on stock CI.
+    $ctor = new ReflectionMethod(Typst\Document::class, '__construct');
+    if ($ctor->isInternal() || $ctor->getNumberOfRequiredParameters() > 0) {
+        $this->markTestSkipped('Typst\\Document cannot be constructed directly on this build');
+    }
+    $ref = new ReflectionMethod(TypstRenderProducer::class, 'clampPage');
+    $ref->setAccessible(true);
+    $document = new Typst\Document();
+    expect(fn() => $ref->invoke($this->producer, $document, 0))
+        ->toThrow(TypstCompilationException::class, 'document has no pages');
+});
+
 /**
  * Write the bytes for a `local` storage_mode asset to disk at the
  * path the producer reads from — `<storage>/assets/<token>.<ext>`
