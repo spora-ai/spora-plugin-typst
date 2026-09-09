@@ -185,19 +185,15 @@ final class TypstDiagnosticFormatter
         // scopes imports to the principal root, so the basename
         // alone won't resolve. Direct the operator to the right
         // prefix.
-        if (str_contains($message, '(file not found)')) {
-            $hint = 'Imports in the Editor compile from the principal root; uploaded templates live under "templates/" and examples under "examples/". Use #import "templates/foo.typ" or #include "examples/bar.typ" — upload via the Templates or Examples tab.';
-        } elseif (str_contains($message, 'no font could be found')) {
+        return match (true) {
+            str_contains($message, '(file not found)') => 'Imports in the Editor compile from the principal root; uploaded templates live under "templates/" and examples under "examples/". Use #import "templates/foo.typ" or #include "examples/bar.typ" — upload via the Templates or Examples tab.',
             // The operator referenced a font by name that the bundled
             // + principal-tier `font_dirs` don't contain.
-            $hint = 'Upload the font via the Fonts tab, or reference one of the bundled fonts (Inter, DejaVu Sans, Latin Modern Math) by its basename.';
-        } elseif (preg_match('/\bunknown variable\b/', $message) === 1) {
+            str_contains($message, 'no font could be found') => 'Upload the font via the Fonts tab, or reference one of the bundled fonts (Inter, DejaVu Sans, Latin Modern Math) by its basename.',
             // Most often a typo in a function name or a missing
             // import.
-            $hint = 'Check the spelling, or add the missing #import at the top of the source.';
-        } else {
-            $hint = null;
-        }
-        return $hint;
+            preg_match('/\bunknown variable\b/', $message) === 1 => 'Check the spelling, or add the missing #import at the top of the source.',
+            default => null,
+        };
     }
 }
