@@ -212,8 +212,11 @@ final class TypstPreviewController
      * Mirror {@see TypstCompileController::findProducer()}: prefer
      * the test seam (closure returning a pre-built producer), fall
      * back to discovery. TypstRenderProducer is the only producer in
-     * this plugin; once instantiated via discovery, both `/compile`
-     * and `/preview` share the same producer instance.
+     * this plugin, but each request constructs its own instance —
+     * PHP-DI autowires `TypstWorldFactory` fresh per request and
+     * there is no singleton binding for the producer (only a
+     * discovery entry, which resolves to a class name, not an
+     * instance).
      */
     private function findProducer(): ?TypstPreviewProducerInterface
     {

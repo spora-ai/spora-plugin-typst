@@ -199,10 +199,13 @@ final class TypstRenderProducer implements MediaDerivativeProducerInterface, Typ
      * document passed in by a test fixture) wouldn't need to copy
      * the inspector-first logic.
      *
-     * `page` / `ppi` / `principalId` are extracted here because both
-     * public surfaces normalise them from their respective sources
-     * (`produce()` from the MediaAsset, `produceFromString()` from
-     * the caller's argument list) before reaching this point.
+      * `principalId` is normalised by the public surfaces
+     * (`produce()` from `MediaAsset->principal_id`,
+     * `produceFromString()` from the caller's argument list)
+     * before reaching this point. `page` is extracted here from
+     * `$options`; `ppi` is extracted further downstream inside
+     * `renderPng()` because it is only meaningful for the PNG
+     * branch (and the SVG/PDF paths don't need to know about it).
      */
     private function compileAndRender(string $bytes, string $format, ?int $principalId, array $options): DerivativeOutput
     {

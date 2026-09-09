@@ -119,9 +119,17 @@ final class TypstDiagnosticFormatter
 
     /**
      * Map a {@see Severity} enum to the lowercase wire label the
-     * frontend's colour rules key off. Unknown future enum cases
-     * degrade to "error" — fail loud rather than silently dropping
-     * the diagnostic into a "neither error nor warning" bucket.
+     * frontend's colour rules key off.
+     *
+     * The `default` arm catches Severity::Hint (an existing case in
+     * the ext-typst enum, not a future one) — a future ext-typst
+     * version that routes hints through the same diagnostic
+     * channel would currently see them labelled as `error` on the
+     * wire. This is unreachable in production today because the
+     * producer's summariseDiagnostics() filters to Severity::Error
+     * before constructing the exception (see
+     * {@see TypstRenderProducer::summariseDiagnostics}); the
+     * default arm is a defensive net for that hypothetical shape.
      */
     private static function severityLabel(Severity $severity): string
     {

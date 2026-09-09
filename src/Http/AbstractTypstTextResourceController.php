@@ -102,15 +102,27 @@ abstract class AbstractTypstTextResourceController
     }
 
     /**
-     * Replace an existing principal-tier resource by basename.
+     * Replace (or create) a principal-tier resource by basename.
      * Body shape: `{ "content": "..." }` — the basename comes from
      * the URL so a typo in the body can't silently rename the row.
      *
      * `TypstResourceStore::write()` is overwrite-by-default, so this
-     * is the same code path as `store()` minus the name field.
-     * 404 if no principal row with that name exists (skill-shipped
-     * rows are surfaced in {@see index()} but cannot be mutated from
-     * the operator UI — that gate is enforced inside the store).
+     * is the same code path as `store()` minus the name field:
+     *   - 422 if the basename fails the regex / length validator
+     *     (delegated to the store).
+     *   - 200 + overwrite when a tier-2 (principal) row already
+     *     exists with that basename.
+     *   - 200 + tier-2 shadow when only a tier-1 (skill-shipped)
+     *     row exists with that basename — the shadow wins on
+     *     subsequent reads. This is intentional and tested:
+     *     "PUT /typst/templates/{name} allows shadowing a
+     *     skill-shipped template".
+     *
+     * Skill-shipped rows are NOT gated against mutation — operators
+     * can shadow them. The only resource-level gate that lives in
+     * the store is on `delete()`, which throws when the basename
+     * doesn't exist in tier-2 (skill-only basenames can't be
+     * deleted because there's nothing to remove).
      */
     public function update(Request $request): JsonResponse
     {
