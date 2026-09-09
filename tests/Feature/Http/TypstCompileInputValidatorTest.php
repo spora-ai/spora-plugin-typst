@@ -28,7 +28,7 @@ it('parses a full compile body into a CompileInputs value object', function (): 
         'name'   => 'letter',
         'format' => 'pdf',
         'page'   => 0,
-        'dpi'    => 144,
+        'ppi'    => 144,
     ]));
 
     expect($inputs)->toBeInstanceOf(CompileInputs::class);
@@ -36,7 +36,7 @@ it('parses a full compile body into a CompileInputs value object', function (): 
     expect($inputs->name)->toBe('letter.typ');
     expect($inputs->format)->toBe('pdf');
     expect($inputs->page)->toBe(0);
-    expect($inputs->dpi)->toBe(144.0);
+    expect($inputs->ppi)->toBe(144.0);
 });
 
 it('defaults the filename to playground.typ when name is omitted', function (): void {
@@ -121,35 +121,35 @@ it('leaves page null when not provided', function (): void {
     expect($inputs->page)->toBeNull();
 });
 
-it('clamps dpi below 36 up to 36', function (): void {
+it('clamps ppi below 36 up to 36', function (): void {
     $validator = new TypstCompileInputValidator();
     $inputs = $validator->parseCompileInputs(validatorCompileRequest([
         'source' => VALIDATOR_HELLO_SOURCE,
         'format' => 'png',
-        'dpi'    => 12,
+        'ppi'    => 12,
     ]));
 
-    expect($inputs->dpi)->toBe(36.0);
+    expect($inputs->ppi)->toBe(36.0);
 });
 
-it('clamps dpi above 600 down to 600', function (): void {
+it('clamps ppi above 600 down to 600', function (): void {
     $validator = new TypstCompileInputValidator();
     $inputs = $validator->parseCompileInputs(validatorCompileRequest([
         'source' => VALIDATOR_HELLO_SOURCE,
         'format' => 'png',
-        'dpi'    => 1200,
+        'ppi'    => 1200,
     ]));
 
-    expect($inputs->dpi)->toBe(600.0);
+    expect($inputs->ppi)->toBe(600.0);
 });
 
-it('leaves dpi null when not provided', function (): void {
+it('leaves ppi null when not provided', function (): void {
     $validator = new TypstCompileInputValidator();
     $inputs = $validator->parseCompileInputs(validatorCompileRequest([
         'source' => VALIDATOR_HELLO_SOURCE,
     ]));
 
-    expect($inputs->dpi)->toBeNull();
+    expect($inputs->ppi)->toBeNull();
 });
 
 it('rejects invalid JSON with the 400 INVALID_JSON envelope', function (): void {

@@ -20,6 +20,14 @@ final readonly class CompileInputs
         public string $name,
         public string $format,
         public ?int $page,
-        public ?float $dpi,
+        /**
+         * Pixels-per-inch for PNG raster output. Validated against
+         * {@see \Spora\Plugins\Typst\Producers\TypstRenderProducer::SUPPORTED_PPI}
+         * as a curated list, but the input validator only enforces
+         * the wider {@see TypstRenderProducer::MIN_PPI}/{@see TypstRenderProducer::MAX_PPI}
+         * range so LLMs can request intermediate values when needed.
+         * `null` lets the producer use its {@see TypstRenderProducer::DEFAULT_PPI}.
+         */
+        public ?float $ppi,
     ) {}
 }

@@ -165,7 +165,8 @@ SVG. The compile flow is exposed as:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, name, format, page, dpi }`) |
+| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, name, format, page, ppi }`) |
+| `POST` | `/api/v1/typst/preview` | Compile inline source to PDF/PNG/SVG and return the bytes inline as base64 — no DB writes (`{ source, name, format, page, ppi }`) |
 
 The endpoint mirrors `TypstCompileTool`'s `action: "render"` path: it
 materialises an inline `text/x-typst` parent row in the playground
