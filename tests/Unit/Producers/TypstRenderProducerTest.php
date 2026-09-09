@@ -220,7 +220,37 @@ it('rejects a local-storage-mode asset with an empty asset_token', function (): 
     $asset->storage_mode = 'local';
     $asset->asset_token = '';
 
-    expect(fn() => $this->producer->produce($asset, 'pdf', []))
+    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+        ->toThrow(TypstRuntimeException::class);
+});
+
+it('rejects a data_url-mode asset with a null payload', function (): void {
+    // readDataUrlBytes asserts `!is_string($payload)` so null /
+    // non-string payloads fail with "empty data_url payload".
+    // An empty string hits the outer `$bytes === ''` guard instead
+    // — that's a separate code path; this test pins the type guard.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-12';
+    $asset->mime_type = PRODUCER_TYPST_MIME;
+    $asset->storage_mode = 'data_url';
+    $asset->payload = null;
+
+    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+        ->toThrow(TypstRuntimeException::class);
+});
+
+it('rejects a local-mode asset with a non-typst mime that has no extension mapping', function (): void {
+    // The extension lookup has a hard-coded map for `text/x-typst`
+    // → `.typ`, plus a fallback to MediaArchiveService. If the
+    // service can't derive an extension either, the producer
+    // throws rather than silently reading the wrong file.
+    $asset = new MediaAsset();
+    $asset->id = 'inline-13';
+    $asset->mime_type = 'application/x-unknown';
+    $asset->storage_mode = 'local';
+    $asset->asset_token = 'spora-typst-test-' . bin2hex(random_bytes(4));
+
+    expect(fn () => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
