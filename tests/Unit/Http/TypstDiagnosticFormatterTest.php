@@ -72,20 +72,13 @@ function buildDiagnostic(Severity $severity, string $message, array $hints = [])
 }
 
 describe('TypstDiagnosticFormatter::diagnostics', function (): void {
-    beforeEach(function (): void {
-        // The `Severity` enum and the diagnostic shape come from
-        // ext-typst at runtime. The Pest bootstrap loads the stubs
-        // when ext-typst isn't installed (CI vanilla ubuntu), so the
-        // file's `use Typst\Diagnostic\Severity` resolves — but the
-        // tests below exercise the formatter against real
-        // Severity::Warning / Severity::Error values that the
-        // production code passes through to the diagnostic formatter.
-        // Skip when the real extension isn't loaded so the suite
-        // still passes CI without ext-typst.
-        if (!extension_loaded('typst')) {
-            $this->markTestSkipped('ext-typst is not loaded');
-        }
-    });
+    // No ext-typst gating here — the formatter is pure PHP and the
+    // `buildDiagnostic()` helper at the top of this file is a
+    // duck-typed anonymous class. We rely on `Typst\Diagnostic\Severity`
+    // resolving through stubs/typst.php on CI (see tests/Pest.php),
+    // which is loaded when ext-typst isn't installed. The single
+    // case that needs the real enum (`Severity::Hint`) self-skips
+    // when Hint isn't a case on the loaded enum.
 
     it('falls back to the exception message with severity=error when diagnostics is empty', function (): void {
         $e = new TypstCompilationException('top-level compile failure', []);
