@@ -220,7 +220,7 @@ it('rejects a local-storage-mode asset with an empty asset_token', function (): 
     $asset->storage_mode = 'local';
     $asset->asset_token = '';
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
@@ -235,7 +235,7 @@ it('rejects a data_url-mode asset with a null payload', function (): void {
     $asset->storage_mode = 'data_url';
     $asset->payload = null;
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
@@ -250,7 +250,7 @@ it('rejects a local-mode asset with a non-typst mime that has no extension mappi
     $asset->storage_mode = 'local';
     $asset->asset_token = 'spora-typst-test-' . bin2hex(random_bytes(4));
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 

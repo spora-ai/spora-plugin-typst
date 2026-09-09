@@ -162,4 +162,28 @@ describe('TypstDiagnosticFormatter::diagnostics', function (): void {
         ]);
         expect(array_key_exists('hint', $out[0]))->toBeFalse();
     });
+
+    it('falls Severity::Hint back to the error wire label (defensive default arm)', function (): void {
+        // The producer's summariseDiagnostics() filters to
+        // Severity::Error before throwing, so Hint-severity
+        // diagnostics never reach the formatter in production. This
+        // test bypasses that filter by injecting a Hint-severity
+        // diagnostic directly, exercising the default arm of
+        // severityLabel() so a future ext-typst version that routes
+        // hints through the same channel doesn't mislabel them.
+        //
+        // Skip on builds where Severity::Hint doesn't exist — the
+        // real ext-typst enum ships only Error + Warning today; the
+        // Hint case is added by stubs/typst.php for CI. We use the
+        // stubs when ext-typst is missing (see tests/Pest.php).
+        $severityCases = (new ReflectionClass(Severity::class))->getConstants();
+        if (!in_array('Hint', array_keys($severityCases), true)) {
+            $this->markTestSkipped('Severity::Hint is not in the loaded ext-typst enum (stubs/typst.php adds it for CI)');
+        }
+        $diag = buildDiagnostic(Severity::Hint, 'consider adding a label');
+        $e = new TypstCompilationException('compile failure', [$diag]);
+        $out = TypstDiagnosticFormatter::diagnostics($e);
+        expect($out[0]['severity'])->toBe('error');
+        expect($out[0]['message'])->toBe('consider adding a label');
+    });
 });
