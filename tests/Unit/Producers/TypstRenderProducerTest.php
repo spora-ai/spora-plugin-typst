@@ -483,6 +483,66 @@ describe('TypstRenderProducer (no ext-typst required)', function (): void {
             ->toThrow(TypstRuntimeException::class, 'unsupported derivative format');
     });
 
+    it('produceFromString() routes through the stackFactory seam without ext-typst', function (): void {
+        // The compile path (compileAndRender) requires a real
+        // Inspector + Compiler + World stack — but the producer
+        // exposes a $stackFactory seam so tests can inject a
+        // minimal stub. The stub here records that compileString()
+        // was invoked and the stackFactory reached compileAndRender.
+        //
+        // \Typst\Document is final and can't be subclassed, so we
+        // can't synthesise a Document here — but we can prove the
+        // stackFactory is invoked and the compileAndRender branch
+        // for the inspector's success path is reached by inspecting
+        // the inspector's behaviour. The Document-rendering paths
+        // (renderPng/Pdf/Svg) are covered by the ext-typst-required
+        // describe block on dev builds.
+        $inspectorCalled = false;
+        $stackFactory = function (?int $principalId) use (&$inspectorCalled): array {
+            $inspectorCalled = true;
+            return [
+                'world'     => null,
+                'compiler'  => new class {
+                    public function compileString(string $src): object
+                    {
+                        throw new RuntimeException('compileString should not reach the inspector path');
+                    }
+                },
+                'inspector' => new class {
+                    public function inspectString(string $src): object
+                    {
+                        // Record that we reached compileAndRender's
+                        // inspector branch; return an error so
+                        // compileAndRender throws before trying to
+                        // render. The point is to prove the seam
+                        // works without ext-typst.
+                        throw new RuntimeException('inspector invoked');
+                    }
+                },
+            ];
+        };
+        $paths = new Paths(sys_get_temp_dir());
+        $stubProducer = new TypstRenderProducer(new TypstWorldFactory($paths), $stackFactory);
+
+        expect(fn() => $stubProducer->produceFromString("= Hi\n", 'png', principalId: 7))
+            ->toThrow(RuntimeException::class, 'inspector invoked');
+    });
+
+    it('produceFromString() rejects the format-gate default arm without ext-typst', function (): void {
+        // Pin the runtime error when an unsupported format sneaks
+        // past the public gate (assertSupportedFormat should have
+        // already caught it; this default arm in compileAndRender is
+        // defensive — PHPStan wants an exhaustive match).
+        //
+        // We invoke the private compileAndRender directly via
+        // Reflection because the public surfaces all gate on
+        // assertSupportedFormat() first.
+        $ref = new ReflectionMethod(TypstRenderProducer::class, 'compileAndRender');
+        $ref->setAccessible(true);
+        expect(fn() => $ref->invoke($this->producer, '= Hi', 'mp4', null, []))
+            ->toThrow(TypstRuntimeException::class, 'assertSupportedFormat');
+    });
+
     it('rejects a data_url-mode asset with a null payload', function (): void {
         // readDataUrlBytes asserts `!is_string($payload)` so null /
         // non-string payloads fail with "empty data_url payload"
