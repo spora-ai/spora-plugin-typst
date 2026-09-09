@@ -536,10 +536,55 @@ describe('TypstRenderProducer (no ext-typst required)', function (): void {
         //
         // We invoke the private compileAndRender directly via
         // Reflection because the public surfaces all gate on
-        // assertSupportedFormat() first.
+        // assertSupportedFormat() first. Inject a stackFactory so
+        // the test doesn't depend on ext-typst being loaded to
+        // build the world/compiler/inspector stack. The stack
+        // succeeds the inspection (no errors) and produces a
+        // throwaway document so compileAndRender reaches the format
+        // match, where the default arm fires.
+        $stackFactory = static function (?int $p): array {
+            $document = new class {
+                public function pageCount(): int
+                {
+                    return 1;
+                }
+            };
+            return [
+                'world'     => null,
+                'compiler'  => new class ($document) {
+                    public function __construct(private readonly object $doc) {}
+                    public function compileString(string $src): object
+                    {
+                        return $this->doc;
+                    }
+                },
+                'inspector' => new class {
+                    public function inspectString(string $src): object
+                    {
+                        return new class {
+                            public function success(): bool
+                            {
+                                return true;
+                            }
+                            public function hasErrors(): bool
+                            {
+                                return false;
+                            }
+                            public function errors(): array
+                            {
+                                return [];
+                            }
+                        };
+                    }
+                },
+            ];
+        };
+        $paths = new Paths(sys_get_temp_dir());
+        $stubProducer = new TypstRenderProducer(new TypstWorldFactory($paths), $stackFactory);
+
         $ref = new ReflectionMethod(TypstRenderProducer::class, 'compileAndRender');
         $ref->setAccessible(true);
-        expect(fn() => $ref->invoke($this->producer, '= Hi', 'mp4', null, []))
+        expect(fn() => $ref->invoke($stubProducer, '= Hi', 'mp4', null, []))
             ->toThrow(TypstRuntimeException::class, 'assertSupportedFormat');
     });
 
