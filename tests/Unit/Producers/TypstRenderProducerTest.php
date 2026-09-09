@@ -197,7 +197,7 @@ it('rejects a local-storage-mode asset whose on-disk file is missing', function 
     $asset->asset_token = 'spora-typst-test-' . bin2hex(random_bytes(4));
     // Deliberately don't write the file.
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
@@ -209,7 +209,7 @@ it('rejects an unknown storage_mode with a runtime exception', function (): void
     $asset->payload = null;
     $asset->asset_token = null;
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
@@ -220,7 +220,7 @@ it('rejects a local-storage-mode asset with an empty asset_token', function (): 
     $asset->storage_mode = 'local';
     $asset->asset_token = '';
 
-    expect(fn () => $this->producer->produce($asset, 'pdf', []))
+    expect(fn() => $this->producer->produce($asset, 'pdf', []))
         ->toThrow(TypstRuntimeException::class);
 });
 
@@ -228,18 +228,18 @@ it('rejects a local-storage-mode asset with an empty asset_token', function (): 
  * Write the bytes for a `local` storage_mode asset to disk at the
  * path the producer reads from — `<storage>/assets/<token>.<ext>`
  * where `<ext>` is derived from the source MIME. The path mirrors
- * {@see \Spora\Plugins\Typst\Producers\TypstRenderProducer::readLocalBytes()}.
+ * {@see TypstRenderProducer::readLocalBytes()}.
  */
 function writeLocalAsset(string $token, string $mime, string $bytes): void
 {
     $ext = match (strtolower($mime)) {
         PRODUCER_TYPST_MIME => 'typ',
-        default => throw new \InvalidArgumentException("unsupported mime for test: {$mime}"),
+        default => throw new InvalidArgumentException("unsupported mime for test: {$mime}"),
     };
     $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
     $dir = $base . '/storage/assets';
     if (!is_dir($dir) && !mkdir($dir, 0o755, true) && !is_dir($dir)) {
-        throw new \RuntimeException("failed to create {$dir}");
+        throw new RuntimeException("failed to create {$dir}");
     }
     file_put_contents("{$dir}/{$token}.{$ext}", $bytes);
 }
