@@ -4,7 +4,7 @@ description: "When the user asks for a typeset document, a PDF report, a slide d
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.1"
+  version: "1.2"
   allowedByDefault: false
   requiresTools: "typst_compile,typst_resources"
 ---
@@ -132,7 +132,9 @@ Use Typst's markup, not LaTeX, not Markdown. For the canonical
 one-page reference of every feature below, read the bundled
 `examples/showcase.typ` — it renders a complete demo document
 and is the file the operator should `typst_compile(action: "inspect")` first when
-in doubt about syntax.
+in doubt about syntax. (`examples/showcase.typ` is a skill-shipped
+asset — the operator's own `examples/` uploads take precedence;
+see [Resources](#resources).)
 
 ```typst
 = Heading 1
@@ -194,6 +196,8 @@ for italic body. `show math.equation` wires math mode to Latin Modern
 Math (the bundled math font), and `show raw` pins code blocks to DejaVu
 Sans Mono. The bundled `templates/report.typ` and `examples/showcase.typ`
 already declare all three — import them and the cascade comes for free.
+These are skill-shipped (tier-1) defaults; if the operator has uploaded a
+`report.typ` or `showcase.typ` of their own, that one wins.
 
 `typst_resources(action="fonts", op="write")` adds more fonts at the
 principal tier. Tier-2 wins on basename collision, so uploading a font
@@ -201,30 +205,51 @@ named `Inter-Regular.ttf` shadows the bundled one for that principal.
 
 ## Resources
 
-Three resource kinds, two tiers each:
+Three resource kinds, two tiers each — **with the user-uploaded (tier-2) surface as the primary one and the skill-shipped (tier-1) surface as a fallback**. The operator's library is the source of truth; the skill ships only the minimum needed to render out of the box on a fresh install.
 
-| Kind        | Purpose                                                 | Tier 1 (skill-shipped, read-only)             | Tier 2 (principal, writable)                  |
-|-------------|---------------------------------------------------------|----------------------------------------------|------------------------------------------------|
-| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<plugin>/skills/typst/fonts/` (Inter + DejaVu + Latin Modern Math) | `<storage>/typst/<principal>/fonts/`          |
-| `template`  | Full document skeletons the agent composes from data     | `<plugin>/skills/typst/templates/` (report)   | `<storage>/typst/<principal>/templates/`      |
-| `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<plugin>/skills/typst/examples/` (showcase) | `<storage>/typst/<principal>/examples/`       |
-| `image`     | Reference images for `#image()`                          | (none — there are no skill-shipped images)  | `<storage>/typst/<principal>/` (flat)          |
+| Kind        | Purpose                                                 | Tier 2 — principal uploads (primary, writable)  | Tier 1 — skill-shipped (fallback, read-only)  |
+|-------------|---------------------------------------------------------|--------------------------------------------------|----------------------------------------------|
+| `font`      | Custom fonts (`.ttf`/`.otf`/`.woff`/`.woff2`)            | `<storage>/typst/<principal>/fonts/`             | `<plugin>/skills/typst/fonts/` (Inter + DejaVu + Latin Modern Math) |
+| `template`  | Full document skeletons the agent composes from data     | `<storage>/typst/<principal>/templates/`         | `<plugin>/skills/typst/templates/` (report)  |
+| `example`   | Pattern snippets the LLM cribs from (the full showcase) | `<storage>/typst/<principal>/examples/`          | `<plugin>/skills/typst/examples/` (showcase) |
+| `image`     | Reference images for `#image()`                          | `<storage>/typst/<principal>/` (flat)            | (none — there are no skill-shipped images)   |
 
-Resources are listed with `typst_resources(action="resources_list", kind="<kind>")`.
-Uploads use `typst_resources(action="resources_write", kind="<kind>", name="...", content="...")`.
-Tier-2 wins on basename collision — uploading a font named `Inter-Regular.otf`
-overrides the skill-shipped one for that principal only.
+### Resource discovery — list first, prefer user uploads
 
-The plugin's Typst world is built per principal with:
+Before composing a document that uses a template or example, list what's available for the active principal:
+
+```jsonc
+typst_resources(action: "templates", op: "list")   // returns {name, kind, origin, size, modified_at, ...}
+typst_resources(action: "examples",  op: "list")
+```
+
+Each row carries an `origin` field:
+
+- `origin: "principal"` — uploaded by the operator for this principal via `POST /api/v1/typst/templates` (or the Templates tab on the admin panel).
+- `origin: "skill"` — read-only, shipped with the plugin. Visible in the listing so the operator can see what defaults are available, but the operator cannot delete them.
+
+**Default to the `origin: "principal"` row when both kinds share a basename** (tier-2 wins on collision — the operator's upload shadows the skill-shipped one). Use a `origin: "skill"` row only when:
+
+1. No matching principal upload exists.
+2. The operator explicitly asked for the skill-shipped asset ("render the showcase", "use the report template").
+3. You're reaching for the bundled font cascade (`Inter` → `DejaVu Sans` → `DejaVu Serif`) — those are tier-1 and never get uploaded.
+
+When `action` is `op: "write"` or `op: "delete"` on a `origin: "skill"` basename, the operation fails (tier-1 is read-only). Don't try to delete bundled assets to "clean up" the listing — they're meant to stay visible as fallbacks.
+
+Uploads use `typst_resources(action: "templates", op: "write", name: "...", content: "...")` (mirrors for `examples` and `fonts`). 5 MiB cap, basename charset `[A-Za-z0-9._-]`.
+
+### The plugin's Typst world
+
+Built per principal with:
 
 - `template_dir: <storage>/typst/<principal>/` — so `templates/`,
   `examples/`, and uploaded images are all visible as siblings of the
   principal root. Include with `#include "templates/report.typ"` or
   `#include "examples/showcase.typ"`.
   Skill-shipped templates and examples are NOT auto-injected into
-  the principal's `template_dir`; the operator lists them via
-  `typst_resources` and pastes the basename explicitly when they
-  want to use one.
+  the principal's `template_dir`; the agent lists them via
+  `typst_resources` and pastes the basename explicitly when it
+  wants to use one.
 
 - `font_dirs: [<plugin>/skills/typst/fonts/, <storage>/typst/<principal>/fonts/]`
   — Typst searches both. Reference by family name (`font: "Inter"`)
@@ -306,6 +331,11 @@ typst_compile(action: "render", file: "01HXYZ_TYPSOURCE_UUID", format: "svg", pa
 - `typst_compile(action: "render")` always persists the derivative; there's no "preview
   without saving" mode. Use `typst_compile(action: "inspect")` when you don't want a
   media-derivative row.
+- **Don't default to the skill-shipped `templates/report.typ` or `examples/showcase.typ`
+  just because they're available.** Before using any template or example, list what's
+  uploaded for the active principal and prefer `origin: "principal"` rows. The
+  skill-shipped assets exist as fallbacks for fresh installs, not as the default
+  surface — see [Resources](#resources).
 
 ## When NOT to use Typst
 
