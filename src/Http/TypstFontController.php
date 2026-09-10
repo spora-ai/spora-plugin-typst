@@ -58,6 +58,11 @@ final class TypstFontController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
+        // Materialise the user-principal first so the chip-row's
+        // ?principal_id is in visiblePrincipalIdsFor() on the very
+        // first GET in a session (when no principal-tier row exists
+        // yet for this user, the visibility list is []).
+        $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
@@ -77,8 +82,12 @@ final class TypstFontController
      */
     public function show(Request $request): Response
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
+        try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
+        } catch (FontPrincipalNotVisible $e) {
+            return $e->response;
+        }
         $bytes = $store->read(TypstResourcePaths::KIND_FONT, $name);
         if ($bytes === null) {
             return $this->notFound('NOT_FOUND', sprintf('Font "%s" not found', $name));
@@ -97,11 +106,11 @@ final class TypstFontController
     public function store(Request $request): JsonResponse
     {
         try {
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $bytes = $this->decodeContent($inputs['content']);
             $path = $store->write(TypstResourcePaths::KIND_FONT, $inputs['name'], $bytes);
-        } catch (FontValidationFailed $e) {
+        } catch (FontPrincipalNotVisible | FontValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -151,10 +160,12 @@ final class TypstFontController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
         try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
             $store->delete(TypstResourcePaths::KIND_FONT, $name);
+        } catch (FontPrincipalNotVisible $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             // Skill-shipped + missing-both map to 422 — the resource
             // exists logically (it's in the listing) but isn't
@@ -165,15 +176,28 @@ final class TypstFontController
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
     }
 
-    private function storeForCurrentUser(): TypstResourceStore
+    /**
+     * Same scope logic as {@see index()} — materialise the
+     * user-principal first, resolve ?principal_id=N via the
+     * visibility check, throw a sentinel for invisible principals.
+     *
+     * @throws FontPrincipalNotVisible when the request names a
+     *         principal the caller can't see. Caught by the public
+     *         endpoints and surfaced as 404.
+     */
+    private function storeForRequest(Request $request): TypstResourceStore
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        $principalId = $this->principals->ensureUserPrincipal($userId)->id;
-        $paths = new TypstResourcePaths($this->paths(), $principalId);
-        return new TypstResourceStore($paths);
+        $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new FontPrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
+        }
+        return $this->storeForPrincipal($principalId);
     }
 
     /**
@@ -245,5 +269,18 @@ final class FontValidationFailed extends RuntimeException
     public function __construct(public readonly JsonResponse $response)
     {
         parent::__construct('font validation failed');
+    }
+}
+
+/**
+ * Sentinel for invisible-principal requests; the public endpoints'
+ * single catch arm unwinds with `$e->response` instead of a second
+ * inline `return $this->notFound(...)` (Sonar's S1142 budget).
+ */
+final class FontPrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('font: principal not visible to caller');
     }
 }

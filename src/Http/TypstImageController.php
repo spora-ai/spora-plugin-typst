@@ -53,6 +53,11 @@ final class TypstImageController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
+        // Materialise the user-principal first so the chip-row's
+        // ?principal_id is in visiblePrincipalIdsFor() on the very
+        // first GET in a session (when no principal-tier row exists
+        // yet for this user, the visibility list is []).
+        $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
@@ -87,8 +92,12 @@ final class TypstImageController
      */
     public function show(Request $request): Response
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
+        try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
+        } catch (ImagePrincipalNotVisible $e) {
+            return $e->response;
+        }
         $bytes = $store->read($name);
         if ($bytes === null) {
             return $this->notFound('NOT_FOUND', sprintf('Image "%s" not found', $name));
@@ -114,14 +123,15 @@ final class TypstImageController
     public function store(Request $request): JsonResponse
     {
         try {
+            $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $bytes = $this->decodeContent($inputs['content']);
-            $row = $this->storeForCurrentUser()->write(
+            $row = $store->write(
                 $bytes,
                 $inputs['mime'],
                 $inputs['filename'],
             );
-        } catch (ImageValidationFailed $e) {
+        } catch (ImagePrincipalNotVisible | ImageValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -180,38 +190,46 @@ final class TypstImageController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
         try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
             $store->delete($name);
+        } catch (ImagePrincipalNotVisible $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
     }
 
-    private function storeForCurrentUser(): TypstImageStore
+    /**
+     * Same scope logic as {@see index()} — materialise the
+     * user-principal first, resolve ?principal_id=N via the
+     * visibility check, throw a sentinel for invisible principals.
+     *
+     * @throws ImagePrincipalNotVisible when the request names a
+     *         principal the caller can't see. Caught by the public
+     *         endpoints and surfaced as 404.
+     */
+    private function storeForRequest(Request $request): TypstImageStore
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
-        return $this->storeForPrincipal($this->principalIdForCurrentUser());
+        $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new ImagePrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
+        }
+        return $this->storeForPrincipal($principalId);
     }
 
     private function storeForPrincipal(int $principalId): TypstImageStore
     {
         $paths = new TypstResourcePaths($this->paths, $principalId);
         return new TypstImageStore($paths);
-    }
-
-    private function principalIdForCurrentUser(): int
-    {
-        $userId = $this->auth->currentUserId();
-        if ($userId === null || $userId <= 0) {
-            throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
-        }
-        return $this->principals->ensureUserPrincipal($userId)->id;
     }
 
     private function resolvePrincipalId(Request $request, int $userId): int
@@ -271,5 +289,18 @@ final class ImageValidationFailed extends RuntimeException
     public function __construct(public readonly JsonResponse $response)
     {
         parent::__construct('image validation failed');
+    }
+}
+
+/**
+ * Sentinel for invisible-principal requests; the public endpoints'
+ * single catch arm unwinds with `$e->response` instead of a second
+ * inline `return $this->notFound(...)` (Sonar's S1142 budget).
+ */
+final class ImagePrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('image: principal not visible to caller');
     }
 }

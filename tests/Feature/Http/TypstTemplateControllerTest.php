@@ -126,6 +126,37 @@ it('GET /typst/templates respects ?principal_id for visible principals', functio
     expect($body['error']['code'])->toBe('NOT_FOUND');
 });
 
+it('GET /typst/templates?principal_id=<user> succeeds on the very first request after registration (no prior write)', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility. Without that,
+    // visiblePrincipalIdsFor() returns [] on the first GET in
+    // a session (no principal-tier row exists yet for this user)
+    // and the chip-row's ?principal_id falls outside that empty
+    // set → 404 on what should be the user's own scope. Operators
+    // saw this as "every Typst request 404s" until they happened
+    // to do a write that triggered ensureUserPrincipal first.
+    //
+    // We can't read the principal ID back through the
+    // principalService (that would mask the bug). Instead we
+    // fetch the principal via the DB directly, which is exactly
+    // what the controller's resolvePrincipalId() does — so the
+    // 404 it would emit without the fix is genuine.
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    // Sanity: ensureUserPrincipal in beforeEach would have
+    // materialised this row. If the row doesn't exist at this
+    // point the test is misconfigured — assert so the failure is
+    // obvious in CI.
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create('/api/v1/typst/templates?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});
+
 it('PUT /typst/templates/{name} replaces an existing template', function () {
     $this->resourceStore->write('template', 'letter.typ', '= Original');
 
@@ -167,4 +198,69 @@ it('PUT /typst/templates/{name} allows shadowing a skill-shipped template (creat
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['data']['template']['origin'])->toBe('principal');
     expect($body['data']['template']['size'])->toBe(strlen('= Custom report'));
+});
+
+it('POST /typst/templates?principal_id=N writes under the named principal (regression: upload vanished after reload)', function (): void {
+    // Before the fix, store()/update()/destroy()/show() ignored
+    // ?principal_id and always wrote to the caller's user-principal,
+    // so uploads in another principal "vanished after reload" —
+    // the next list call (scoped to the selected principal) didn't
+    // see them. The fix routes show/store/update/destroy through
+    // the same principal resolver as index().
+    $userId = (int) $this->auth->currentUserId();
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForTemplateUpload');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    // Write to the group principal.
+    $writeReq = Request::create(
+        '/api/v1/typst/templates?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME],
+        content: json_encode(['name' => 'group-letter.typ', 'content' => '= Group letter']),
+    );
+    $writeResp = $this->controller->store($writeReq);
+    expect($writeResp->getStatusCode())->toBe(201);
+
+    // Listing under the group principal sees the new row.
+    $listReq = Request::create('/api/v1/typst/templates?principal_id=' . $groupPrincipalId, 'GET');
+    $listBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($listBody['data']['templates'], 'name'))->toContain('group-letter.typ');
+
+    // The user's own principal does NOT see the row.
+    $userReq = Request::create(TEMPLATES_PATH, 'GET');
+    $userBody = json_decode((string) $this->controller->index($userReq)->getContent(), true);
+    expect(array_column($userBody['data']['templates'], 'name'))->not->toContain('group-letter.typ');
+
+    // Read it back via show() with the same principal_id.
+    $showReq = Request::create('/api/v1/typst/templates/group-letter.typ?principal_id=' . $groupPrincipalId, 'GET');
+    $showReq->attributes->set('name', 'group-letter.typ');
+    $showResp = $this->controller->show($showReq);
+    expect($showResp->getStatusCode())->toBe(200);
+    expect((string) $showResp->getContent())->toBe('= Group letter');
+
+    // Delete it under the group principal.
+    $delReq = Request::create('/api/v1/typst/templates/group-letter.typ?principal_id=' . $groupPrincipalId, 'DELETE');
+    $delReq->attributes->set('name', 'group-letter.typ');
+    expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
+
+    // Listing under the group principal no longer sees it.
+    $afterBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($afterBody['data']['templates'], 'name'))->not->toContain('group-letter.typ');
+});
+
+it('POST /typst/templates?principal_id=<invisible> returns 404 (probe protection)', function (): void {
+    // A second user the caller can't see must not be writable.
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create(
+        '/api/v1/typst/templates?principal_id=' . $otherPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME],
+        content: json_encode(['name' => 'x.typ', 'content' => '= X']),
+    );
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(404);
+    expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('NOT_FOUND');
 });

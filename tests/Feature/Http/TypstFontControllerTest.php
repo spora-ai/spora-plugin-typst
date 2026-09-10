@@ -173,3 +173,65 @@ it('DELETE /typst/fonts/{name} returns 422 for a missing font', function () {
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('NOT_DELETABLE');
 });
+
+it('POST /typst/fonts?principal_id=N writes under the named principal (regression: upload vanished after reload)', function (): void {
+    $userId = (int) $this->auth->currentUserId();
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForFontUpload');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    $writeReq = Request::create(
+        '/api/v1/typst/fonts?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => FONT_JSON_MIME],
+        content: json_encode(['name' => 'group-font.otf', 'content' => 'AAAB']),
+    );
+    expect($this->controller->store($writeReq)->getStatusCode())->toBe(201);
+
+    $listReq = Request::create('/api/v1/typst/fonts?principal_id=' . $groupPrincipalId, 'GET');
+    $listBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($listBody['data']['fonts'], 'name'))->toContain('group-font.otf');
+
+    $userBody = json_decode((string) $this->controller->index(Request::create(FONTS_PATH, 'GET'))->getContent(), true);
+    expect(array_column($userBody['data']['fonts'], 'name'))->not->toContain('group-font.otf');
+
+    $delReq = Request::create('/api/v1/typst/fonts/group-font.otf?principal_id=' . $groupPrincipalId, 'DELETE');
+    $delReq->attributes->set('name', 'group-font.otf');
+    expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
+});
+
+it('GET /typst/fonts?principal_id=<user> succeeds on the very first request after registration', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility (mirrors the
+    // TemplateController fix).
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create(FONTS_PATH . '?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});
+
+it('POST /typst/fonts?principal_id=<invisible> surfaces the 404 from FontPrincipalNotVisible', function (): void {
+    // Pin the sentinel-exception path that storeForRequest()
+    // throws when the requested principal isn't visible — covers
+    // the `throw new FontPrincipalNotVisible(...)` line and the
+    // public `catch (FontPrincipalNotVisible | FontValidationFailed $e)`
+    // arm on the store() / show() / destroy() surfaces.
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create(
+        FONTS_PATH . '?principal_id=' . $otherPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => FONT_JSON_MIME],
+        content: json_encode(['name' => 'x.otf', 'content' => 'AAAB']),
+    );
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(404);
+    expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('NOT_FOUND');
+});

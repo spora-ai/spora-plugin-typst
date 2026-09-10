@@ -115,8 +115,7 @@ final class TypstResourcesTool extends AbstractTypstTool
         // tool would throw on every principal-scoped operation. We
         // now build a fresh `TypstResourcePaths` per call from the
         // orchestrator-supplied `PrincipalContext`, mirroring the
-        // per-request `storeForCurrentUser()` pattern the HTTP
-        // controllers use.
+        // per-request pattern the HTTP controllers use.
         $paths = new TypstResourcePaths($this->paths(), $context?->principalId);
 
         return match ($action) {
