@@ -63,8 +63,12 @@ abstract class AbstractTypstTextResourceController
 
     public function show(Request $request): Response
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
+        try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
         $bytes = $store->read($this->kind(), $name);
         if ($bytes === null) {
             return $this->notFound('NOT_FOUND', sprintf('%s "%s" not found', ucfirst($this->singularName()), $name));
@@ -79,9 +83,11 @@ abstract class AbstractTypstTextResourceController
     public function store(Request $request): JsonResponse
     {
         try {
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $path = $store->write($this->kind(), $inputs['name'], $inputs['content']);
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
         } catch (ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
@@ -133,9 +139,11 @@ abstract class AbstractTypstTextResourceController
                     $this->unprocessable('VALIDATION_ERROR', 'name is required in the URL'),
                 );
             }
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $content = $this->parseUpdateContent($request);
             $path = $store->write($this->kind(), $name, $content);
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
         } catch (ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
@@ -203,25 +211,47 @@ abstract class AbstractTypstTextResourceController
 
     public function destroy(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
         try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
             $store->delete($this->kind(), $name);
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
         } catch (RuntimeException $e) {
             return $this->unprocessable('NOT_DELETABLE', $e->getMessage());
         }
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
     }
 
-    protected function storeForCurrentUser(): TypstResourceStore
+    /**
+     * Resolve a store scoped to the principal named by `?principal_id=N`,
+     * falling back to the caller's own user-principal when the param
+     * is absent. Mirrors {@see index()} so list/show/store/update/destroy
+     * all read/write the same principal — fixing the bug where uploads
+     * in a non-default principal "vanished after reload" because the
+     * store/update paths were pinned to the user's own principal while
+     * the listing path honored `?principal_id`.
+     *
+     * @throws ResourcePrincipalNotVisible when the request names a
+     *         principal the caller can't see. Caught by the public
+     *         endpoints and surfaced as 404 — matches the existing
+     *         `index()` pattern.
+     */
+    protected function storeForRequest(Request $request): TypstResourceStore
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        $principalId = $this->principals->ensureUserPrincipal($userId)->id;
-        $paths = new TypstResourcePaths($this->paths(), $principalId);
-        return new TypstResourceStore($paths);
+        // Materialise the caller's user-principal so visibility
+        // checks have a row to anchor on.
+        $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new ResourcePrincipalNotVisible($e->getMessage(), previous: $e);
+        }
+        return $this->storeForPrincipal($principalId);
     }
 
     protected function storeForPrincipal(int $principalId): TypstResourceStore
@@ -276,3 +306,11 @@ final class ResourceValidationFailed extends RuntimeException
         parent::__construct('resource validation failed');
     }
 }
+
+/**
+ * Sentinel thrown by {@see AbstractTypstTextResourceController::storeForRequest()}
+ * when the request names a principal the caller can't see. Surfaced
+ * as 404 by the public endpoints so a probe can't enumerate other
+ * principals via this route.
+ */
+final class ResourcePrincipalNotVisible extends RuntimeException {}

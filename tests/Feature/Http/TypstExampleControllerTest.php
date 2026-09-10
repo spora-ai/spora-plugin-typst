@@ -87,3 +87,33 @@ it('PUT /typst/examples/{name} rejects an invalid basename with 422', function (
     $resp = $this->controller->update($req);
     expect($resp->getStatusCode())->toBe(422);
 });
+
+it('POST /typst/examples?principal_id=N writes under the named principal (regression: upload vanished after reload)', function (): void {
+    $userId = (int) $this->auth->currentUserId();
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForExampleUpload');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    $writeReq = Request::create(
+        '/api/v1/typst/examples?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => EXAMPLE_JSON_MIME],
+        content: json_encode(['name' => 'group-hello.typ', 'content' => '= Group hello']),
+    );
+    expect($this->controller->store($writeReq)->getStatusCode())->toBe(201);
+
+    $listReq = Request::create('/api/v1/typst/examples?principal_id=' . $groupPrincipalId, 'GET');
+    $listBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($listBody['data']['examples'], 'name'))->toContain('group-hello.typ');
+
+    $userBody = json_decode((string) $this->controller->index(Request::create(EXAMPLES_PATH, 'GET'))->getContent(), true);
+    expect(array_column($userBody['data']['examples'], 'name'))->not->toContain('group-hello.typ');
+
+    $showReq = Request::create('/api/v1/typst/examples/group-hello.typ?principal_id=' . $groupPrincipalId, 'GET');
+    $showReq->attributes->set('name', 'group-hello.typ');
+    expect((string) $this->controller->show($showReq)->getContent())->toBe('= Group hello');
+
+    $delReq = Request::create('/api/v1/typst/examples/group-hello.typ?principal_id=' . $groupPrincipalId, 'DELETE');
+    $delReq->attributes->set('name', 'group-hello.typ');
+    expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
+});

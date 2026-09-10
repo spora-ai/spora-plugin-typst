@@ -196,3 +196,33 @@ it('GET /typst/images with ?principal_id=99 returns 404 (principal not visible)'
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('NOT_FOUND');
 });
+
+it('POST /typst/images?principal_id=N writes under the named principal (regression: upload vanished after reload)', function (): void {
+    // Use base64 long enough to bypass the decode heuristic (>16 chars).
+    // AAAB (4 chars) is below the threshold and falls through to the
+    // raw-text path, which then fails the empty-payload guard.
+    $userId = (int) $this->auth->currentUserId();
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForImageUpload');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    $bytes = base64_encode(random_bytes(32));
+    $writeReq = Request::create(
+        '/api/v1/typst/images?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'logo.png', 'mime' => 'image/png', 'content' => $bytes]),
+    );
+    expect($this->controller->store($writeReq)->getStatusCode())->toBe(201);
+
+    $listReq = Request::create('/api/v1/typst/images?principal_id=' . $groupPrincipalId, 'GET');
+    $listBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($listBody['data']['images'], 'name'))->toContain('logo.png');
+
+    $userBody = json_decode((string) $this->controller->index(Request::create('/api/v1/typst/images', 'GET'))->getContent(), true);
+    expect(array_column($userBody['data']['images'], 'name'))->not->toContain('logo.png');
+
+    $delReq = Request::create('/api/v1/typst/images/logo.png?principal_id=' . $groupPrincipalId, 'DELETE');
+    $delReq->attributes->set('name', 'logo.png');
+    expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
+});

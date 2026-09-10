@@ -77,8 +77,12 @@ final class TypstFontController
      */
     public function show(Request $request): Response
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
+        try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
+        } catch (FontPrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
+        }
         $bytes = $store->read(TypstResourcePaths::KIND_FONT, $name);
         if ($bytes === null) {
             return $this->notFound('NOT_FOUND', sprintf('Font "%s" not found', $name));
@@ -97,10 +101,12 @@ final class TypstFontController
     public function store(Request $request): JsonResponse
     {
         try {
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $bytes = $this->decodeContent($inputs['content']);
             $path = $store->write(TypstResourcePaths::KIND_FONT, $inputs['name'], $bytes);
+        } catch (FontPrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
         } catch (FontValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
@@ -151,10 +157,12 @@ final class TypstFontController
      */
     public function destroy(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
         try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
             $store->delete(TypstResourcePaths::KIND_FONT, $name);
+        } catch (FontPrincipalNotVisible $e) {
+            return $this->notFound('NOT_FOUND', $e->getMessage());
         } catch (RuntimeException $e) {
             // Skill-shipped + missing-both map to 422 — the resource
             // exists logically (it's in the listing) but isn't
@@ -165,15 +173,32 @@ final class TypstFontController
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
     }
 
-    private function storeForCurrentUser(): TypstResourceStore
+    /**
+     * Resolve a store scoped to the principal named by `?principal_id=N`,
+     * falling back to the caller's own user-principal. Mirrors
+     * `index()` so list/show/store/destroy all read/write the same
+     * principal — fixing the bug where uploads in a non-default
+     * principal "vanished after reload".
+     *
+     * @throws FontPrincipalNotVisible when the request names a
+     *         principal the caller can't see. Caught by the public
+     *         endpoints and surfaced as 404.
+     */
+    private function storeForRequest(Request $request): TypstResourceStore
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        $principalId = $this->principals->ensureUserPrincipal($userId)->id;
-        $paths = new TypstResourcePaths($this->paths(), $principalId);
-        return new TypstResourceStore($paths);
+        // Materialise the caller's user-principal so visibility
+        // checks have a row to anchor on.
+        $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new FontPrincipalNotVisible($e->getMessage(), previous: $e);
+        }
+        return $this->storeForPrincipal($principalId);
     }
 
     /**
@@ -247,3 +272,11 @@ final class FontValidationFailed extends RuntimeException
         parent::__construct('font validation failed');
     }
 }
+
+/**
+ * Sentinel thrown by {@see TypstFontController::storeForRequest()}
+ * when the request names a principal the caller can't see. Surfaced
+ * as 404 by the public endpoints so a probe can't enumerate other
+ * principals via this route.
+ */
+final class FontPrincipalNotVisible extends RuntimeException {}
