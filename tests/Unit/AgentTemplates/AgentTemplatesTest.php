@@ -25,31 +25,47 @@ function loadAgentTemplate(string $basename): array
 }
 
 /**
- * Loads every agent template shipped in the plugin's
- * `agent-templates/` directory and asserts each NEW template
- * validates against {@see AgentTemplateValidator}. Existing
- * templates (assistant.json) are skipped — out of scope here.
+ * Every agent template shipped in `agent-templates/` must validate
+ * cleanly against {@see AgentTemplateValidator}. The directory
+ * previously contained an `assistant.json` that violated the schema
+ * (`agent.allow_continuation` is not in the validator's allow-list,
+ * and `metadata.archetype: "typesetting"` + `metadata.category:
+ * "creative"` are not in their respective enums). The expert is a
+ * strict superset of that role and ships the only template now.
  */
-it('validates the new typst-expert template against AgentTemplateValidator', function (): void {
-    $path = AGENT_TEMPLATES_DIR . '/typst-expert.json';
-    expect(is_file($path))->toBeTrue();
+it('validates every shipped agent template against AgentTemplateValidator', function (): void {
+    $files = glob(AGENT_TEMPLATES_DIR . '/*.json') ?: [];
+    expect($files)->not->toBeEmpty('agent-templates/ directory should contain at least one .json');
 
-    $raw = json_decode((string) file_get_contents($path), true);
-    expect($raw)->toBeArray('typst-expert.json should parse as JSON');
+    $validator = new AgentTemplateValidator();
+    foreach ($files as $path) {
+        $basename = basename((string) $path);
+        $raw      = json_decode((string) file_get_contents((string) $path), true);
+        expect($raw)->toBeArray("{$basename} should parse as JSON");
 
-    $result = (new AgentTemplateValidator())->validate($raw);
-    expect($result->isValid())->toBeTrue(
-        'typst-expert.json should validate cleanly; errors: ' . json_encode($result->errors()),
-    );
+        $result = $validator->validate($raw);
+        expect($result->isValid())->toBeTrue(
+            "{$basename} should validate cleanly; errors: " . json_encode($result->errors()),
+        );
+    }
 });
 
-it('ships a typst-expert agent template distinct from typst-assistant', function (): void {
-    $assistant = loadAgentTemplate('assistant.json');
-    $expert    = loadAgentTemplate('typst-expert.json');
+it('ships typst-expert as the sole plugin agent template', function (): void {
+    // The previous typst-assistant template was a general-purpose
+    // profile that has been superseded by typst-expert (a strict
+    // superset: same tools + approval semantics, plus SkillTool
+    // wired to the typst skill and a two-artefact teaser/PDF
+    // workflow). Keeping two profiles doubled the template surface
+    // to maintain without giving operators a meaningfully different
+    // choice, so the assistant has been removed.
+    $files = array_map(
+        static fn(string $path): string => basename($path),
+        glob(AGENT_TEMPLATES_DIR . '/*.json') ?: [],
+    );
+    expect($files)->toBe(['typst-expert.json']);
 
-    expect($assistant['id'])->toBe('typst-assistant');
+    $expert = loadAgentTemplate('typst-expert.json');
     expect($expert['id'])->toBe('typst-expert');
-    expect($assistant['id'])->not->toBe($expert['id']);
 
     // The expert must declare a semver version and a non-empty
     // system_prompt — the validator only WARNs on a missing
@@ -84,10 +100,10 @@ it('wires SkillTool with the typst skill allowed on the typst-expert agent', fun
     expect($allowed)->toContain('typst');
 });
 
-it('preserves the same tool activations as typst-assistant for typst_compile and typst_resources', function (): void {
-    // The expert is a *specialist*, not a regression — it must keep
-    // the same per-operation approval semantics as the general
-    // assistant so operators don't see a surprise when toggling.
+it('pins the per-operation approval semantics on typst_compile and typst_resources', function (): void {
+    // Operators toggling the expert see the same per-operation
+    // approval surface as the old assistant: render requires
+    // approval; inspect and all four resources ops are auto-approved.
     $expert = loadAgentTemplate('typst-expert.json');
     $tools  = $expert['tools'] ?? [];
 
