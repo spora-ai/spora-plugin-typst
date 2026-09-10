@@ -248,3 +248,18 @@ it('GET /typst/images?principal_id=<user> succeeds on the very first request aft
     $resp = $this->controller->index($req);
     expect($resp->getStatusCode())->toBe(200);
 });
+
+it('POST /typst/images?principal_id=<invisible> surfaces the 404 from ImagePrincipalNotVisible', function (): void {
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create(
+        '/api/v1/typst/images?principal_id=' . $otherPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'x.png', 'mime' => 'image/png', 'content' => base64_encode(random_bytes(32))]),
+    );
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(404);
+    expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('NOT_FOUND');
+});

@@ -215,3 +215,23 @@ it('GET /typst/fonts?principal_id=<user> succeeds on the very first request afte
     $resp = $this->controller->index($req);
     expect($resp->getStatusCode())->toBe(200);
 });
+
+it('POST /typst/fonts?principal_id=<invisible> surfaces the 404 from FontPrincipalNotVisible', function (): void {
+    // Pin the sentinel-exception path that storeForRequest()
+    // throws when the requested principal isn't visible — covers
+    // the `throw new FontPrincipalNotVisible(...)` line and the
+    // public `catch (FontPrincipalNotVisible | FontValidationFailed $e)`
+    // arm on the store() / show() / destroy() surfaces.
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create(
+        FONTS_PATH . '?principal_id=' . $otherPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => FONT_JSON_MIME],
+        content: json_encode(['name' => 'x.otf', 'content' => 'AAAB']),
+    );
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(404);
+    expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('NOT_FOUND');
+});
