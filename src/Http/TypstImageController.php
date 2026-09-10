@@ -91,7 +91,7 @@ final class TypstImageController
             $store = $this->storeForRequest($request);
             $name = (string) $request->attributes->get('name', '');
         } catch (ImagePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         }
         $bytes = $store->read($name);
         if ($bytes === null) {
@@ -126,9 +126,7 @@ final class TypstImageController
                 $inputs['mime'],
                 $inputs['filename'],
             );
-        } catch (ImagePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
-        } catch (ImageValidationFailed $e) {
+        } catch (ImagePrincipalNotVisible | ImageValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -192,7 +190,7 @@ final class TypstImageController
             $name = (string) $request->attributes->get('name', '');
             $store->delete($name);
         } catch (ImagePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->notFound('NOT_FOUND', $e->getMessage());
         }
@@ -224,7 +222,7 @@ final class TypstImageController
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
-            throw new ImagePrincipalNotVisible($e->getMessage(), previous: $e);
+            throw new ImagePrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
         }
         return $this->storeForPrincipal($principalId);
     }
@@ -297,8 +295,15 @@ final class ImageValidationFailed extends RuntimeException
 
 /**
  * Sentinel thrown by {@see TypstImageController::storeForRequest()}
- * when the request names a principal the caller can't see. Surfaced
- * as 404 by the public endpoints so a probe can't enumerate other
- * principals via this route.
+ * when the request names a principal the caller can't see. Carries
+ * the 404 JsonResponse so the public endpoint's single `catch` arm
+ * unwinds without piling up `return $errorResponse` statements
+ * (Sonar's S1142 budget).
  */
-final class ImagePrincipalNotVisible extends RuntimeException {}
+final class ImagePrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('image: principal not visible to caller');
+    }
+}

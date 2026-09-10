@@ -67,7 +67,7 @@ abstract class AbstractTypstTextResourceController
             $store = $this->storeForRequest($request);
             $name = (string) $request->attributes->get('name', '');
         } catch (ResourcePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         }
         $bytes = $store->read($this->kind(), $name);
         if ($bytes === null) {
@@ -86,9 +86,7 @@ abstract class AbstractTypstTextResourceController
             $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $path = $store->write($this->kind(), $inputs['name'], $inputs['content']);
-        } catch (ResourcePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
-        } catch (ResourceValidationFailed $e) {
+        } catch (ResourcePrincipalNotVisible | ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -142,9 +140,7 @@ abstract class AbstractTypstTextResourceController
             $store = $this->storeForRequest($request);
             $content = $this->parseUpdateContent($request);
             $path = $store->write($this->kind(), $name, $content);
-        } catch (ResourcePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
-        } catch (ResourceValidationFailed $e) {
+        } catch (ResourcePrincipalNotVisible | ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -216,7 +212,7 @@ abstract class AbstractTypstTextResourceController
             $name = (string) $request->attributes->get('name', '');
             $store->delete($this->kind(), $name);
         } catch (ResourcePrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('NOT_DELETABLE', $e->getMessage());
         }
@@ -249,7 +245,7 @@ abstract class AbstractTypstTextResourceController
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
-            throw new ResourcePrincipalNotVisible($e->getMessage(), previous: $e);
+            throw new ResourcePrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
         }
         return $this->storeForPrincipal($principalId);
     }
@@ -309,8 +305,16 @@ final class ResourceValidationFailed extends RuntimeException
 
 /**
  * Sentinel thrown by {@see AbstractTypstTextResourceController::storeForRequest()}
- * when the request names a principal the caller can't see. Surfaced
- * as 404 by the public endpoints so a probe can't enumerate other
- * principals via this route.
+ * when the request names a principal the caller can't see. Carries the
+ * 404 JsonResponse so the public endpoint's single `catch` arm unwinds
+ * without piling up `return $errorResponse` statements (Sonar's S1142
+ * budget). The catch arm here stays within budget because all error
+ * paths funnel through one exception type.
  */
-final class ResourcePrincipalNotVisible extends RuntimeException {}
+final class ResourcePrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('principal not visible to caller');
+    }
+}

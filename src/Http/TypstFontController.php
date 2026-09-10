@@ -81,7 +81,7 @@ final class TypstFontController
             $store = $this->storeForRequest($request);
             $name = (string) $request->attributes->get('name', '');
         } catch (FontPrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         }
         $bytes = $store->read(TypstResourcePaths::KIND_FONT, $name);
         if ($bytes === null) {
@@ -105,9 +105,7 @@ final class TypstFontController
             $inputs = $this->parseStoreInputs($request);
             $bytes = $this->decodeContent($inputs['content']);
             $path = $store->write(TypstResourcePaths::KIND_FONT, $inputs['name'], $bytes);
-        } catch (FontPrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
-        } catch (FontValidationFailed $e) {
+        } catch (FontPrincipalNotVisible | FontValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -162,7 +160,7 @@ final class TypstFontController
             $name = (string) $request->attributes->get('name', '');
             $store->delete(TypstResourcePaths::KIND_FONT, $name);
         } catch (FontPrincipalNotVisible $e) {
-            return $this->notFound('NOT_FOUND', $e->getMessage());
+            return $e->response;
         } catch (RuntimeException $e) {
             // Skill-shipped + missing-both map to 422 — the resource
             // exists logically (it's in the listing) but isn't
@@ -196,7 +194,7 @@ final class TypstFontController
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
-            throw new FontPrincipalNotVisible($e->getMessage(), previous: $e);
+            throw new FontPrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
         }
         return $this->storeForPrincipal($principalId);
     }
@@ -275,8 +273,15 @@ final class FontValidationFailed extends RuntimeException
 
 /**
  * Sentinel thrown by {@see TypstFontController::storeForRequest()}
- * when the request names a principal the caller can't see. Surfaced
- * as 404 by the public endpoints so a probe can't enumerate other
- * principals via this route.
+ * when the request names a principal the caller can't see. Carries
+ * the 404 JsonResponse so the public endpoint's single `catch` arm
+ * unwinds without piling up `return $errorResponse` statements
+ * (Sonar's S1142 budget).
  */
-final class FontPrincipalNotVisible extends RuntimeException {}
+final class FontPrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('font: principal not visible to caller');
+    }
+}
