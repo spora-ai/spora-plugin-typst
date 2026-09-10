@@ -34,6 +34,19 @@ if (!defined('BASE_PATH')) {
 
 require_once BASE_PATH . '/vendor/autoload.php';
 
+// CI on a vanilla ubuntu runner doesn't ship ext-typst, so any
+// test that imports `Typst\…` (e.g. the diagnostic formatter's
+// Severity enum) would fail at parse time before the test's own
+// `extension_loaded()` check could run. Load the stubs from
+// `stubs/typst.php` only when the extension is missing so the
+// test files can `use Typst\…` unconditionally. When ext-typst
+// is loaded (local dev), the real classes take precedence —
+// PHP's class table is populated by the C extension at startup
+// before this bootstrap runs.
+if (!extension_loaded('typst') && is_file(BASE_PATH . '/stubs/typst.php')) {
+    require_once BASE_PATH . '/stubs/typst.php';
+}
+
 set_error_handler(static function (...$handlerArgs): bool {
     [$errno, , $errfile] = $handlerArgs;
 

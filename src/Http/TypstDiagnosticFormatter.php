@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Spora\Plugins\Typst\Http;
 
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
+use Typst\Diagnostic\Severity;
 
 /**
  * Build the API-facing diagnostic envelope for a {@see TypstCompilationException}.
@@ -13,26 +14,66 @@ use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
  * public-surface method count stays under Sonar's S1448 budget
  * (the controller owns the auth + body-parsing + producer pipeline;
  * this class owns the JSON shape that surfaces compiler errors).
+ *
+ * Wire shape (one entry per diagnostic):
+ *
+ *   {
+ *     "message":  "<sanitised message>",
+ *     "severity": "error" | "warning",
+ *     "hint":     "<optional fix suggestion>"
+ *   }
+ *
+ * `severity` is the ext-typst Severity enum lower-cased — the
+ * frontend uses it to colour the entry red (error) vs amber
+ * (warning). `hint` is either:
+ *   - the compiler's own built-in hint (via `Diagnostic::hints()`),
+ *     or
+ *   - a synthetic hint {@see hintFor()} produces for the most common
+ *     operator mistakes (file not found, missing font, unknown
+ *     variable). Hints are best-effort — an unmatched error gets no
+ *     hint entry and the operator sees the raw message alone.
+ *
+ * Backward compatibility: the previous envelope only had `message`.
+ * Clients that only read `message` are unaffected; the new
+ * `severity` / `hint` fields are additive.
  */
 final class TypstDiagnosticFormatter
 {
     /**
-     * Build a list of `{"message": "..."}` entries for the API
-     * envelope. Each Typst compiler diagnostic message is sanitised
-     * to strip absolute paths / search-at-fragments before being
-     * returned — those would leak the operator's filesystem layout
-     * through the playground error panel.
+     * Build a list of `{"message", "severity", "hint"?}` entries for
+     * the API envelope. Each Typst compiler diagnostic message is
+     * sanitised to strip absolute paths / search-at-fragments before
+     * being returned — those would leak the operator's filesystem
+     * layout through the playground error panel.
      *
-     * @return list<array{message: string}>
+     * @return list<array{message: string, severity: string, hint?: string}>
      */
     public static function diagnostics(TypstCompilationException $e): array
     {
         $out = [];
         foreach ($e->diagnostics as $diag) {
-            $out[] = ['message' => self::sanitise($diag->message())];
+            $sanitised = self::sanitise($diag->message());
+            $entry = [
+                'message'  => $sanitised,
+                'severity' => self::severityLabel($diag->severity()),
+            ];
+            $hint = self::resolveHint($diag, $sanitised);
+            if ($hint !== null) {
+                $entry['hint'] = $hint;
+            }
+            $out[] = $entry;
         }
         if ($out === []) {
-            $out[] = ['message' => self::sanitise($e->getMessage())];
+            $sanitised = self::sanitise($e->getMessage());
+            $entry = [
+                'message'  => $sanitised,
+                'severity' => 'error',
+            ];
+            $hint = self::hintFor($sanitised);
+            if ($hint !== null) {
+                $entry['hint'] = $hint;
+            }
+            $out[] = $entry;
         }
         return $out;
     }
@@ -74,5 +115,85 @@ final class TypstDiagnosticFormatter
             $message,
         ) ?? $message;
         return $message;
+    }
+
+    /**
+     * Map a {@see Severity} enum to the lowercase wire label the
+     * frontend's colour rules key off.
+     *
+     * The `default` arm catches Severity::Hint (an existing case in
+     * the ext-typst enum, not a future one) — a future ext-typst
+     * version that routes hints through the same diagnostic
+     * channel would currently see them labelled as `error` on the
+     * wire. This is unreachable in production today because the
+     * producer's summariseDiagnostics() filters to Severity::Error
+     * before constructing the exception (see
+     * {@see TypstRenderProducer::summariseDiagnostics}); the
+     * default arm is a defensive net for that hypothetical shape.
+     */
+    private static function severityLabel(Severity $severity): string
+    {
+        return match ($severity) {
+            Severity::Error   => 'error',
+            Severity::Warning => 'warning',
+            default           => 'error',
+        };
+    }
+
+    /**
+     * Compose the hint for a diagnostic: prefer the compiler's own
+     * {@see \Typst\Diagnostic\Diagnostic::hints()} (Typst ships
+     * pre-baked suggestions for the common cases), then fall back to
+     * {@see hintFor()} for the operator-specific mistakes only this
+     * plugin can recognise (file-not-found convention, missing font,
+     * etc.).
+     *
+     * `object` rather than `Diagnostic` because PECL's Diagnostic
+     * class is `final` and can't be mocked — tests pass duck-typed
+     * objects (anonymous classes with severity/message/hints). The
+     * production path uses real Diagnostic instances from
+     * {@see \Typst\Inspector::inspectString()}.
+     */
+    private static function resolveHint(object $diag, string $sanitised): ?string
+    {
+        // Compiler hints come first when present — Typst's own
+        // suggestions are usually more accurate than ours.
+        $compilerHints = method_exists($diag, 'hints') ? $diag->hints() : [];
+        if ($compilerHints !== []) {
+            return implode(' ', $compilerHints);
+        }
+        return self::hintFor($sanitised);
+    }
+
+    /**
+     * Pattern-matched hints for the operator mistakes only this
+     * plugin can recognise. Generic Typst errors fall through to the
+     * compiler's own {@see \Typst\Diagnostic\Diagnostic::hints()}.
+     *
+     * The first matching pattern wins; patterns are intentionally
+     * conservative so we don't mis-diagnose unrelated errors. Add
+     * new patterns at the bottom of the chain, not the top, so a
+     * narrower pattern can override a wider one later.
+     */
+    private static function hintFor(string $message): ?string
+    {
+        // File-not-found after sanitisation: the `(file not found)`
+        // placeholder is what `sanitise()` produces from
+        // `(searched at <path>)`. Most often this hits `#include` /
+        // `#import` of a basename the operator uploaded via the
+        // Templates or Examples tab — the plugin's `template_dir`
+        // scopes imports to the principal root, so the basename
+        // alone won't resolve. Direct the operator to the right
+        // prefix.
+        return match (true) {
+            str_contains($message, '(file not found)') => 'Imports in the Editor compile from the principal root; uploaded templates live under "templates/" and examples under "examples/". Use #import "templates/foo.typ" or #include "examples/bar.typ" — upload via the Templates or Examples tab.',
+            // The operator referenced a font by name that the bundled
+            // + principal-tier `font_dirs` don't contain.
+            str_contains($message, 'no font could be found') => 'Upload the font via the Fonts tab, or reference one of the bundled fonts (Inter, DejaVu Sans, Latin Modern Math) by its basename.',
+            // Most often a typo in a function name or a missing
+            // import.
+            preg_match('/\bunknown variable\b/', $message) === 1 => 'Check the spelling, or add the missing #import at the top of the source.',
+            default => null,
+        };
     }
 }

@@ -41,8 +41,8 @@ use Throwable;
  *     "source": "= Hello, Typst!\n",
  *     "name":   "letter.typ",                // default "playground.typ"
  *     "format": "pdf" | "png" | "svg",       // default pdf
- *     "page":   0,                            // png only (0-indexed)
- *     "dpi":    144                           // png only (36..600)
+ *     "page":   0,                            // png/svg only (0-indexed)
+ *     "ppi":    144                           // png only (36..600)
  *   }
  *
  * The controller materialises an inline `text/x-typst` parent row so
@@ -160,7 +160,7 @@ final class TypstCompileController
                 format: $inputs->format,
                 options: array_filter([
                     'page' => $inputs->page,
-                    'dpi'  => $inputs->dpi,
+                    'ppi'  => $inputs->ppi,
                 ], static fn($v): bool => $v !== null),
             );
         } catch (Throwable $e) {
@@ -379,7 +379,7 @@ final class TypstCompileController
             return '';
         }
         try {
-            $png = $producer->produce($parent, 'png', ['page' => 0, 'dpi' => 144.0]);
+            $png = $producer->produce($parent, 'png', ['page' => 0, 'ppi' => 144.0]);
             $pngDerivative = $this->derivativeService->create(
                 parent: $parent,
                 output: $png,

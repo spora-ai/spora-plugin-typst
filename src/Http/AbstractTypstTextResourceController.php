@@ -102,6 +102,60 @@ abstract class AbstractTypstTextResourceController
     }
 
     /**
+     * Replace (or create) a principal-tier resource by basename.
+     * Body shape: `{ "content": "..." }` — the basename comes from
+     * the URL so a typo in the body can't silently rename the row.
+     *
+     * `TypstResourceStore::write()` is overwrite-by-default, so this
+     * is the same code path as `store()` minus the name field:
+     *   - 422 if the basename fails the regex / length validator
+     *     (delegated to the store).
+     *   - 200 + overwrite when a tier-2 (principal) row already
+     *     exists with that basename.
+     *   - 200 + tier-2 shadow when only a tier-1 (skill-shipped)
+     *     row exists with that basename — the shadow wins on
+     *     subsequent reads. This is intentional and tested:
+     *     "PUT /typst/templates/{name} allows shadowing a
+     *     skill-shipped template".
+     *
+     * Skill-shipped rows are NOT gated against mutation — operators
+     * can shadow them. The only resource-level gate that lives in
+     * the store is on `delete()`, which throws when the basename
+     * doesn't exist in tier-2 (skill-only basenames can't be
+     * deleted because there's nothing to remove).
+     */
+    public function update(Request $request): JsonResponse
+    {
+        try {
+            $name = (string) $request->attributes->get('name', '');
+            if ($name === '') {
+                throw new ResourceValidationFailed(
+                    $this->unprocessable('VALIDATION_ERROR', 'name is required in the URL'),
+                );
+            }
+            $store = $this->storeForCurrentUser();
+            $content = $this->parseUpdateContent($request);
+            $path = $store->write($this->kind(), $name, $content);
+        } catch (ResourceValidationFailed $e) {
+            return $e->response;
+        } catch (RuntimeException $e) {
+            return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
+        }
+
+        return new JsonResponse([
+            'data' => [
+                $this->singularName() => [
+                    'name'   => $name,
+                    'kind'   => $this->kind(),
+                    'size'   => strlen($content),
+                    'path'   => $path,
+                    'origin' => 'principal',
+                ],
+            ],
+        ], Response::HTTP_OK);
+    }
+
+    /**
      * @return array{name: string, content: string}
      */
     private function parseStoreInputs(Request $request): array
@@ -125,6 +179,26 @@ abstract class AbstractTypstTextResourceController
         }
 
         return ['name' => $name, 'content' => $content];
+    }
+
+    /**
+     * Extract `content` from a PUT body. Mirrors
+     * {@see parseStoreInputs()} minus the name field — the URL is
+     * the source of truth for which resource is being replaced.
+     */
+    private function parseUpdateContent(Request $request): string
+    {
+        $body = $this->safeDecodeJson($request);
+        if ($body instanceof JsonResponse) {
+            throw new ResourceValidationFailed($body);
+        }
+        $content = $body['content'] ?? null;
+        if (!is_string($content) || $content === '') {
+            throw new ResourceValidationFailed(
+                $this->unprocessable('VALIDATION_ERROR', 'content is required'),
+            );
+        }
+        return $content;
     }
 
     public function destroy(Request $request): JsonResponse

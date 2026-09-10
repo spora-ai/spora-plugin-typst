@@ -15,6 +15,7 @@ use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
 use Spora\Plugins\Typst\Http\TypstImageController;
 use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
+use Spora\Plugins\Typst\Http\TypstPreviewController;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
@@ -67,6 +68,8 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
 {
     private const AUTH                  = [AuthMiddleware::class, CsrfMiddleware::class];
     private const SOURCES_ROUTE_PATTERN = '/api/v1/typst/sources/{id}';
+    private const TEMPLATES_ROUTE_PATTERN = '/api/v1/typst/templates/{name}';
+    private const EXAMPLES_ROUTE_PATTERN = '/api/v1/typst/examples/{name}';
 
     /**
      * Subscribes to the two spora-core lifecycle events that replace
@@ -102,6 +105,7 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
             TypstExampleController::class          => \DI\autowire(),
             TypstImageController::class            => \DI\autowire(),
             TypstCompileController::class          => \DI\autowire(),
+            TypstPreviewController::class          => \DI\autowire(),
             TypstPlaygroundSourceController::class => \DI\autowire(),
             TypstCompileTool::class                => \DI\autowire(),
             TypstResourcesTool::class              => \DI\autowire(),
@@ -128,15 +132,17 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
 
         // Templates (full document skeletons)
         $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], self::AUTH);
-        $r->addRoute('GET', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'show'], self::AUTH);
+        $r->addRoute('GET', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], self::AUTH);
-        $r->addRoute('DELETE', '/api/v1/typst/templates/{name}', [TypstTemplateController::class, 'destroy'], self::AUTH);
+        $r->addRoute('PUT', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'update'], self::AUTH);
+        $r->addRoute('DELETE', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'destroy'], self::AUTH);
 
         // Examples (small pattern snippets — separate kind, separate URL prefix)
         $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], self::AUTH);
-        $r->addRoute('GET', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'show'], self::AUTH);
+        $r->addRoute('GET', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], self::AUTH);
-        $r->addRoute('DELETE', '/api/v1/typst/examples/{name}', [TypstExampleController::class, 'destroy'], self::AUTH);
+        $r->addRoute('PUT', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'update'], self::AUTH);
+        $r->addRoute('DELETE', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'destroy'], self::AUTH);
 
         // Images — the basename (not a row id) is the addressable key.
         $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], self::AUTH);
@@ -144,8 +150,14 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
         $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], self::AUTH);
         $r->addRoute('DELETE', '/api/v1/typst/images/{name}', [TypstImageController::class, 'destroy'], self::AUTH);
 
-        // Playground — compile inline Typst source to PDF/PNG/SVG.
+        // Editor — compile inline Typst source to PDF/PNG/SVG.
+        // /compile persists a media_assets + media_derivatives row;
+        // /preview returns the bytes inline and writes nothing. The
+        // operator-facing Editor tab defaults to /preview so each
+        // render doesn't add a parent row to the media archive; the
+        // LLM tool's typst_compile still uses /compile.
         $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], self::AUTH);
+        $r->addRoute('POST', '/api/v1/typst/preview', [TypstPreviewController::class, 'preview'], self::AUTH);
 
         // Playground source files — list/open/create/save/delete the
         // .typ rows the compile endpoint materialises. The compile

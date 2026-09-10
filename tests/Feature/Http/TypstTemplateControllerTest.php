@@ -125,3 +125,46 @@ it('GET /typst/templates respects ?principal_id for visible principals', functio
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('NOT_FOUND');
 });
+
+it('PUT /typst/templates/{name} replaces an existing template', function () {
+    $this->resourceStore->write('template', 'letter.typ', '= Original');
+
+    $req = Request::create('/api/v1/typst/templates/letter.typ', 'PUT', server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME], content: json_encode(['content' => '= Updated']));
+    $req->attributes->set('name', 'letter.typ');
+    $resp = $this->controller->update($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['template']['name'])->toBe('letter.typ');
+    expect($body['data']['template']['size'])->toBe(strlen('= Updated'));
+
+    // On-disk bytes are replaced — the next GET shows the new content.
+    $readReq = Request::create('/api/v1/typst/templates/letter.typ', 'GET');
+    $readReq->attributes->set('name', 'letter.typ');
+    $readResp = $this->controller->show($readReq);
+    expect((string) $readResp->getContent())->toBe('= Updated');
+});
+
+it('PUT /typst/templates/{name} rejects an empty content payload with 422', function () {
+    $req = Request::create('/api/v1/typst/templates/letter.typ', 'PUT', server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME], content: json_encode(['content' => '']));
+    $req->attributes->set('name', 'letter.typ');
+    $resp = $this->controller->update($req);
+    expect($resp->getStatusCode())->toBe(422);
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['error']['code'])->toBe('VALIDATION_ERROR');
+});
+
+it('PUT /typst/templates/{name} allows shadowing a skill-shipped template (creates tier-2 file)', function () {
+    // Shadowing is intentional — the operator can upload a custom
+    // `report.typ` to override the skill-shipped built-in. PUT
+    // against a tier-1 basename writes a tier-2 sibling that wins
+    // on basename collision in the listing.
+    $req = Request::create('/api/v1/typst/templates/report.typ', 'PUT', server: ['CONTENT_TYPE' => TEMPLATE_JSON_MIME], content: json_encode(['content' => '= Custom report']));
+    $req->attributes->set('name', 'report.typ');
+    $resp = $this->controller->update($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['template']['origin'])->toBe('principal');
+    expect($body['data']['template']['size'])->toBe(strlen('= Custom report'));
+});

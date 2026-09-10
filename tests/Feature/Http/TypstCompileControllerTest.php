@@ -142,7 +142,7 @@ it('POST /typst/compile persists a PNG render and returns width + height', funct
         COMPILE_PATH,
         'POST',
         server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
-        content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'png', 'dpi' => 144]),
+        content: json_encode(['source' => "= Hello, Typst!\n", 'format' => 'png', 'ppi' => 144]),
     );
 
     $resp = $this->controller->compile($req);
