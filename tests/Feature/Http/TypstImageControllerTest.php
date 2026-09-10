@@ -79,6 +79,36 @@ it('POST /typst/images uploads a base64-encoded PNG and returns the URL', functi
     expect($body['data']['image']['name'])->toBe('logo.png');
     expect($body['data']['image']['url'])->toEndWith('logo.png');
     expect($body['data']['image']['size'])->toBe(strlen(base64_decode($b64)));
+    expect($body['data']['image']['renamed'])->toBeFalse();
+    expect($body['data']['image']['original_name'])->toBeNull();
+});
+
+it('POST /typst/images surfaces the rename when the filename has unsafe characters', function () {
+    $b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    $content = base64_encode(base64_decode($b64));
+
+    // Filename with a space — the basename charset rejects it,
+    // so the store falls back to `typst-image-<ts>.<ext>` and
+    // the response carries the rename flag for the UI to surface.
+    $req = Request::create(
+        IMAGES_PATH,
+        'POST',
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
+        content: json_encode([
+            'filename' => 'My Image (1).png',
+            'mime'     => PNG_MIME,
+            'content'  => $content,
+        ]),
+    );
+
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(201);
+
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['image']['name'])->toStartWith('typst-image-');
+    expect($body['data']['image']['name'])->toEndWith('.png');
+    expect($body['data']['image']['renamed'])->toBeTrue();
+    expect($body['data']['image']['original_name'])->toBe('My Image (1).png');
 });
 
 it('POST /typst/images rejects an unsupported mime with 422', function () {

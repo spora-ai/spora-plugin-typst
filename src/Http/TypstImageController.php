@@ -140,11 +140,13 @@ final class TypstImageController
         return new JsonResponse([
             'data' => [
                 'image' => [
-                    'name'        => $row['name'],
-                    'mime'        => $row['mime'],
-                    'size'        => $row['size'],
-                    'modified_at' => $row['modified_at'],
-                    'url'         => $this->publicUrlFor($row['name']),
+                    'name'          => $row['name'],
+                    'mime'          => $row['mime'],
+                    'size'          => $row['size'],
+                    'modified_at'   => $row['modified_at'],
+                    'url'           => $this->publicUrlFor($row['name']),
+                    'renamed'       => (bool) $row['renamed'],
+                    'original_name' => $row['original_name'],
                 ],
             ],
         ], Response::HTTP_CREATED);

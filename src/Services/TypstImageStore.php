@@ -139,10 +139,19 @@ final class TypstImageStore
     }
 
     /**
+    /**
      * Persist a new image (or overwrite an existing one) and return
      * metadata for the API response. The basename is derived from the
      * supplied `$filename` (sanitised) or, when absent, generated
      * from the MIME type and timestamp.
+     *
+     * Returned `renamed` / `original_name` tell the controller
+     * whether the user-supplied filename was replaced by the
+     * timestamp fallback (so it can surface a "your filename was
+     * renamed because…" notice). The original name is never
+     * written to disk.
+     *
+     * @return array{name: string, mime: string, size: int, modified_at: int, path: string, renamed: bool, original_name: ?string}
      */
     public function write(string $bytes, string $mime, ?string $filename = null): array
     {
@@ -164,7 +173,10 @@ final class TypstImageStore
             ));
         }
 
-        $basename = $this->resolveBasename($filename, $mime);
+        $resolved = $this->resolveBasename($filename, $mime);
+        $basename = $resolved[0];
+        $wasRenamed = $resolved[1];
+        $originalName = $resolved[2];
 
         $dir = $this->paths->principalImageDirectory();
         if (!is_dir($dir) && !@mkdir($dir, 0o755, true) && !is_dir($dir)) {
@@ -184,11 +196,13 @@ final class TypstImageStore
 
         $stat = @stat($path);
         return [
-            'name'        => $basename,
-            'mime'        => $mime,
-            'size'        => strlen($bytes),
-            'modified_at' => is_int($stat['mtime'] ?? null) ? $stat['mtime'] : 0,
-            'path'        => $path,
+            'name'          => $basename,
+            'mime'          => $mime,
+            'size'          => strlen($bytes),
+            'modified_at'   => is_int($stat['mtime'] ?? null) ? $stat['mtime'] : 0,
+            'path'          => $path,
+            'renamed'       => $wasRenamed,
+            'original_name' => $wasRenamed ? $originalName : null,
         ];
     }
 
@@ -226,17 +240,25 @@ final class TypstImageStore
     /**
      * Sanitise the supplied filename down to the allowed charset,
      * falling back to `<timestamp>.<ext>` when nothing usable came in.
+     *
+     * Returns `[basename, wasRenamed, originalName]` so the
+     * controller can surface the rename to the operator. The
+     * `originalName` is the user-supplied filename verbatim (or
+     * null when none was supplied) — it never lands on disk and is
+     * only echoed in the upload response.
+     *
+     * @return array{0: string, 1: bool, 2: ?string}
      */
-    private function resolveBasename(?string $filename, string $mime): string
+    private function resolveBasename(?string $filename, string $mime): array
     {
         $ext = self::MIME_TO_EXT[$mime] ?? 'bin';
         if ($filename !== null && $filename !== '') {
             $clean = basename(str_replace('\\', '/', $filename));
             if ($clean !== '' && $clean !== '.' && $clean !== '..' && preg_match(self::BASENAME_PATTERN, $clean)) {
-                return $clean;
+                return [$clean, false, null];
             }
         }
-        return sprintf('typst-image-%d.%s', time(), $ext);
+        return [sprintf('typst-image-%d.%s', time(), $ext), true, $filename];
     }
 
     private function validateBasename(string $basename): void
