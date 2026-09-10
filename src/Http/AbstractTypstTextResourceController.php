@@ -47,12 +47,10 @@ abstract class AbstractTypstTextResourceController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        // Materialise the caller's user-principal so visibility
-        // checks have a row to anchor on. Without this, the first
-        // GET in a session (when no principal-tier row exists yet
-        // for this user) returns [] from visiblePrincipalIdsFor()
-        // and the chip-row's ?principal_id falls outside that
-        // empty set → 404 on what should be the user's own scope.
+        // Materialise the user-principal first so the chip-row's
+        // ?principal_id is in visiblePrincipalIdsFor() on the very
+        // first GET in a session (when no principal-tier row exists
+        // yet for this user, the visibility list is []).
         $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -222,18 +220,13 @@ abstract class AbstractTypstTextResourceController
     }
 
     /**
-     * Resolve a store scoped to the principal named by `?principal_id=N`,
-     * falling back to the caller's own user-principal when the param
-     * is absent. Mirrors {@see index()} so list/show/store/update/destroy
-     * all read/write the same principal — fixing the bug where uploads
-     * in a non-default principal "vanished after reload" because the
-     * store/update paths were pinned to the user's own principal while
-     * the listing path honored `?principal_id`.
+     * Same scope logic as {@see index()} — materialise the
+     * user-principal first, resolve ?principal_id=N via the
+     * visibility check, throw a sentinel for invisible principals.
      *
      * @throws ResourcePrincipalNotVisible when the request names a
      *         principal the caller can't see. Caught by the public
-     *         endpoints and surfaced as 404 — matches the existing
-     *         `index()` pattern.
+     *         endpoints and surfaced as 404.
      */
     protected function storeForRequest(Request $request): TypstResourceStore
     {
@@ -241,8 +234,6 @@ abstract class AbstractTypstTextResourceController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        // Materialise the caller's user-principal so visibility
-        // checks have a row to anchor on.
         $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
@@ -306,12 +297,9 @@ final class ResourceValidationFailed extends RuntimeException
 }
 
 /**
- * Sentinel thrown by {@see AbstractTypstTextResourceController::storeForRequest()}
- * when the request names a principal the caller can't see. Carries the
- * 404 JsonResponse so the public endpoint's single `catch` arm unwinds
- * without piling up `return $errorResponse` statements (Sonar's S1142
- * budget). The catch arm here stays within budget because all error
- * paths funnel through one exception type.
+ * Sentinel for invisible-principal requests; the public endpoints'
+ * single catch arm unwinds with `$e->response` instead of a second
+ * inline `return $this->notFound(...)` (Sonar's S1142 budget).
  */
 final class ResourcePrincipalNotVisible extends RuntimeException
 {
