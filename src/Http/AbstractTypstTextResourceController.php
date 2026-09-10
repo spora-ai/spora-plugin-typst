@@ -47,6 +47,11 @@ abstract class AbstractTypstTextResourceController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
+        // Materialise the user-principal first so the chip-row's
+        // ?principal_id is in visiblePrincipalIdsFor() on the very
+        // first GET in a session (when no principal-tier row exists
+        // yet for this user, the visibility list is []).
+        $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
@@ -63,8 +68,12 @@ abstract class AbstractTypstTextResourceController
 
     public function show(Request $request): Response
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
+        try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $e->response;
+        }
         $bytes = $store->read($this->kind(), $name);
         if ($bytes === null) {
             return $this->notFound('NOT_FOUND', sprintf('%s "%s" not found', ucfirst($this->singularName()), $name));
@@ -79,10 +88,10 @@ abstract class AbstractTypstTextResourceController
     public function store(Request $request): JsonResponse
     {
         try {
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $inputs = $this->parseStoreInputs($request);
             $path = $store->write($this->kind(), $inputs['name'], $inputs['content']);
-        } catch (ResourceValidationFailed $e) {
+        } catch (ResourcePrincipalNotVisible | ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -128,15 +137,10 @@ abstract class AbstractTypstTextResourceController
     {
         try {
             $name = (string) $request->attributes->get('name', '');
-            if ($name === '') {
-                throw new ResourceValidationFailed(
-                    $this->unprocessable('VALIDATION_ERROR', 'name is required in the URL'),
-                );
-            }
-            $store = $this->storeForCurrentUser();
+            $store = $this->storeForRequest($request);
             $content = $this->parseUpdateContent($request);
             $path = $store->write($this->kind(), $name, $content);
-        } catch (ResourceValidationFailed $e) {
+        } catch (ResourcePrincipalNotVisible | ResourceValidationFailed $e) {
             return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('VALIDATION_ERROR', $e->getMessage());
@@ -203,25 +207,40 @@ abstract class AbstractTypstTextResourceController
 
     public function destroy(Request $request): JsonResponse
     {
-        $store = $this->storeForCurrentUser();
-        $name = (string) $request->attributes->get('name', '');
         try {
+            $store = $this->storeForRequest($request);
+            $name = (string) $request->attributes->get('name', '');
             $store->delete($this->kind(), $name);
+        } catch (ResourcePrincipalNotVisible $e) {
+            return $e->response;
         } catch (RuntimeException $e) {
             return $this->unprocessable('NOT_DELETABLE', $e->getMessage());
         }
         return new JsonResponse([], Response::HTTP_NO_CONTENT);
     }
 
-    protected function storeForCurrentUser(): TypstResourceStore
+    /**
+     * Same scope logic as {@see index()} — materialise the
+     * user-principal first, resolve ?principal_id=N via the
+     * visibility check, throw a sentinel for invisible principals.
+     *
+     * @throws ResourcePrincipalNotVisible when the request names a
+     *         principal the caller can't see. Caught by the public
+     *         endpoints and surfaced as 404.
+     */
+    protected function storeForRequest(Request $request): TypstResourceStore
     {
         $userId = $this->auth->currentUserId();
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException('Authentication required');
         }
-        $principalId = $this->principals->ensureUserPrincipal($userId)->id;
-        $paths = new TypstResourcePaths($this->paths(), $principalId);
-        return new TypstResourceStore($paths);
+        $this->principals->ensureUserPrincipal($userId);
+        try {
+            $principalId = $this->resolvePrincipalId($request, $userId);
+        } catch (RuntimeException $e) {
+            throw new ResourcePrincipalNotVisible($this->notFound('NOT_FOUND', $e->getMessage()));
+        }
+        return $this->storeForPrincipal($principalId);
     }
 
     protected function storeForPrincipal(int $principalId): TypstResourceStore
@@ -274,5 +293,18 @@ final class ResourceValidationFailed extends RuntimeException
     public function __construct(public readonly JsonResponse $response)
     {
         parent::__construct('resource validation failed');
+    }
+}
+
+/**
+ * Sentinel for invisible-principal requests; the public endpoints'
+ * single catch arm unwinds with `$e->response` instead of a second
+ * inline `return $this->notFound(...)` (Sonar's S1142 budget).
+ */
+final class ResourcePrincipalNotVisible extends RuntimeException
+{
+    public function __construct(public readonly JsonResponse $response)
+    {
+        parent::__construct('principal not visible to caller');
     }
 }

@@ -79,6 +79,36 @@ it('POST /typst/images uploads a base64-encoded PNG and returns the URL', functi
     expect($body['data']['image']['name'])->toBe('logo.png');
     expect($body['data']['image']['url'])->toEndWith('logo.png');
     expect($body['data']['image']['size'])->toBe(strlen(base64_decode($b64)));
+    expect($body['data']['image']['renamed'])->toBeFalse();
+    expect($body['data']['image']['original_name'])->toBeNull();
+});
+
+it('POST /typst/images surfaces the rename when the filename has unsafe characters', function () {
+    $b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=';
+    $content = base64_encode(base64_decode($b64));
+
+    // Filename with a space — the basename charset rejects it,
+    // so the store falls back to `typst-image-<ts>.<ext>` and
+    // the response carries the rename flag for the UI to surface.
+    $req = Request::create(
+        IMAGES_PATH,
+        'POST',
+        server: ['CONTENT_TYPE' => IMAGE_JSON_MIME],
+        content: json_encode([
+            'filename' => 'My Image (1).png',
+            'mime'     => PNG_MIME,
+            'content'  => $content,
+        ]),
+    );
+
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(201);
+
+    $body = json_decode((string) $resp->getContent(), true);
+    expect($body['data']['image']['name'])->toStartWith('typst-image-');
+    expect($body['data']['image']['name'])->toEndWith('.png');
+    expect($body['data']['image']['renamed'])->toBeTrue();
+    expect($body['data']['image']['original_name'])->toBe('My Image (1).png');
 });
 
 it('POST /typst/images rejects an unsupported mime with 422', function () {
@@ -195,4 +225,71 @@ it('GET /typst/images with ?principal_id=99 returns 404 (principal not visible)'
     expect($resp->getStatusCode())->toBe(404);
     $body = json_decode((string) $resp->getContent(), true);
     expect($body['error']['code'])->toBe('NOT_FOUND');
+});
+
+it('POST /typst/images?principal_id=N writes under the named principal (regression: upload vanished after reload)', function (): void {
+    // Use base64 long enough to bypass the decode heuristic (>16 chars).
+    // AAAB (4 chars) is below the threshold and falls through to the
+    // raw-text path, which then fails the empty-payload guard.
+    $userId = (int) $this->auth->currentUserId();
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'TestGroupForImageUpload');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+
+    $bytes = base64_encode(random_bytes(32));
+    $writeReq = Request::create(
+        '/api/v1/typst/images?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'logo.png', 'mime' => 'image/png', 'content' => $bytes]),
+    );
+    expect($this->controller->store($writeReq)->getStatusCode())->toBe(201);
+
+    $listReq = Request::create('/api/v1/typst/images?principal_id=' . $groupPrincipalId, 'GET');
+    $listBody = json_decode((string) $this->controller->index($listReq)->getContent(), true);
+    expect(array_column($listBody['data']['images'], 'name'))->toContain('logo.png');
+
+    $userBody = json_decode((string) $this->controller->index(Request::create('/api/v1/typst/images', 'GET'))->getContent(), true);
+    expect(array_column($userBody['data']['images'], 'name'))->not->toContain('logo.png');
+
+    $delReq = Request::create('/api/v1/typst/images/logo.png?principal_id=' . $groupPrincipalId, 'DELETE');
+    $delReq->attributes->set('name', 'logo.png');
+    expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
+});
+
+it('GET /typst/images?principal_id=<user> succeeds on the very first request after registration', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility (mirrors the
+    // TemplateController / FontController fix).
+    $userId = (int) $this->auth->currentUserId();
+    // Call the controller first — without ensureUserPrincipal,
+    // it must create the row itself as a side-effect of the
+    // index() call. Then read the principal ID back to confirm.
+    $firstReq = Request::create('/api/v1/typst/images', 'GET');
+    expect($this->controller->index($firstReq)->getStatusCode())->toBe(200);
+
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create('/api/v1/typst/images?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});
+
+it('POST /typst/images?principal_id=<invisible> surfaces the 404 from ImagePrincipalNotVisible', function (): void {
+    $otherUserId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $otherPrincipalId = (int) $this->principalService->ensureUserPrincipal($otherUserId)->id;
+
+    $req = Request::create(
+        '/api/v1/typst/images?principal_id=' . $otherPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => 'application/json'],
+        content: json_encode(['filename' => 'x.png', 'mime' => 'image/png', 'content' => base64_encode(random_bytes(32))]),
+    );
+    $resp = $this->controller->store($req);
+    expect($resp->getStatusCode())->toBe(404);
+    expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('NOT_FOUND');
 });

@@ -44,6 +44,7 @@ beforeEach(function () {
     $this->derivativeService = new MediaDerivativeService(
         new DataUrlAssetStore(),
         $this->principalService,
+        new DI\Container(),
     );
 
     $paths = new Spora\Core\Paths(sys_get_temp_dir());

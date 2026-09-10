@@ -41,6 +41,8 @@ it('persists a PNG image under <storage>/typst/<principal>/', function () {
     expect($row['name'])->toBe('logo.png');
     expect($row['mime'])->toBe(IMAGE_STORE_PNG_MIME);
     expect($row['size'])->toBe(strlen($png));
+    expect($row['renamed'])->toBeFalse();
+    expect($row['original_name'])->toBeNull();
     // Per-principal layout: images live directly under
     // <storage>/typst/<principal>/, not in an images/ subdir.
     expect(is_file($this->tempDir . '/storage/typst/7/logo.png'))->toBeTrue();
@@ -52,6 +54,24 @@ it('mints a sensible default filename when none is supplied', function () {
 
     expect($row['name'])->toStartWith('typst-image-');
     expect($row['name'])->toEndWith('.png');
+    expect($row['renamed'])->toBeTrue();
+    expect($row['original_name'])->toBeNull();
+});
+
+it('flags a rename when the filename has characters outside the safe charset', function () {
+    // Filename has a space — fails the basename regex, so the
+    // store falls back to `typst-image-<ts>.<ext>` and surfaces
+    // the rename so the UI can warn the operator.
+    $png = base64_decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    );
+    expect($png)->not->toBeFalse();
+
+    $row = $this->store->write($png, IMAGE_STORE_PNG_MIME, 'My Image (1).png');
+    expect($row['name'])->toStartWith('typst-image-');
+    expect($row['name'])->toEndWith('.png');
+    expect($row['renamed'])->toBeTrue();
+    expect($row['original_name'])->toBe('My Image (1).png');
 });
 
 it('stores SVG with image/svg+xml', function () {
@@ -61,6 +81,7 @@ it('stores SVG with image/svg+xml', function () {
     expect($row['name'])->toBe('icon.svg');
     expect($row['mime'])->toBe('image/svg+xml');
     expect($row['size'])->toBe(strlen($svg));
+    expect($row['renamed'])->toBeFalse();
 });
 
 it('rejects an unsupported mime', function () {

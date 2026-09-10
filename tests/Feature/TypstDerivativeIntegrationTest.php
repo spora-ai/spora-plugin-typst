@@ -50,6 +50,7 @@ it('produces a derivative through MediaDerivativeService and persists it', funct
     $service = new MediaDerivativeService(
         new Spora\Services\DataUrlAssetStore(),
         new Spora\Services\PrincipalService(new Spora\Services\PrincipalResolver()),
+        new DI\Container(),
     );
     $derivative = $service->create(
         parent: $parent,

@@ -86,6 +86,7 @@ beforeEach(function () {
     $this->derivativeService = new MediaDerivativeService(
         new Spora\Services\DataUrlAssetStore(),
         $this->principalService,
+        new DI\Container(),
     );
 
     // Build the tool with a producer resolver that yields the fake
