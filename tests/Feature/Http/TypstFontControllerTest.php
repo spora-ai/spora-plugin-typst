@@ -199,3 +199,19 @@ it('POST /typst/fonts?principal_id=N writes under the named principal (regressio
     $delReq->attributes->set('name', 'group-font.otf');
     expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
 });
+
+it('GET /typst/fonts?principal_id=<user> succeeds on the very first request after registration', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility (mirrors the
+    // TemplateController fix).
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create(FONTS_PATH . '?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});

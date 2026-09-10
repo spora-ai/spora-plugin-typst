@@ -126,6 +126,37 @@ it('GET /typst/templates respects ?principal_id for visible principals', functio
     expect($body['error']['code'])->toBe('NOT_FOUND');
 });
 
+it('GET /typst/templates?principal_id=<user> succeeds on the very first request after registration (no prior write)', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility. Without that,
+    // visiblePrincipalIdsFor() returns [] on the first GET in
+    // a session (no principal-tier row exists yet for this user)
+    // and the chip-row's ?principal_id falls outside that empty
+    // set → 404 on what should be the user's own scope. Operators
+    // saw this as "every Typst request 404s" until they happened
+    // to do a write that triggered ensureUserPrincipal first.
+    //
+    // We can't read the principal ID back through the
+    // principalService (that would mask the bug). Instead we
+    // fetch the principal via the DB directly, which is exactly
+    // what the controller's resolvePrincipalId() does — so the
+    // 404 it would emit without the fix is genuine.
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    // Sanity: ensureUserPrincipal in beforeEach would have
+    // materialised this row. If the row doesn't exist at this
+    // point the test is misconfigured — assert so the failure is
+    // obvious in CI.
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create('/api/v1/typst/templates?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});
+
 it('PUT /typst/templates/{name} replaces an existing template', function () {
     $this->resourceStore->write('template', 'letter.typ', '= Original');
 

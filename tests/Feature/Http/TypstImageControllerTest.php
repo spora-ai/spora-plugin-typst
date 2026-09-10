@@ -226,3 +226,25 @@ it('POST /typst/images?principal_id=N writes under the named principal (regressi
     $delReq->attributes->set('name', 'logo.png');
     expect($this->controller->destroy($delReq)->getStatusCode())->toBe(204);
 });
+
+it('GET /typst/images?principal_id=<user> succeeds on the very first request after registration', function (): void {
+    // Regression: index() must materialise the caller's
+    // user-principal before checking visibility (mirrors the
+    // TemplateController / FontController fix).
+    $userId = (int) $this->auth->currentUserId();
+    // Call the controller first — without ensureUserPrincipal,
+    // it must create the row itself as a side-effect of the
+    // index() call. Then read the principal ID back to confirm.
+    $firstReq = Request::create('/api/v1/typst/images', 'GET');
+    expect($this->controller->index($firstReq)->getStatusCode())->toBe(200);
+
+    $userPrincipalId = (int) Illuminate\Database\Capsule\Manager::table('principals')
+        ->where('type', 'user')
+        ->where('user_id', $userId)
+        ->value('id');
+    expect($userPrincipalId)->toBeGreaterThan(0);
+
+    $req = Request::create('/api/v1/typst/images?principal_id=' . $userPrincipalId, 'GET');
+    $resp = $this->controller->index($req);
+    expect($resp->getStatusCode())->toBe(200);
+});

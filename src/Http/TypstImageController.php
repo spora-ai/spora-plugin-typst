@@ -53,6 +53,13 @@ final class TypstImageController
         if ($userId === null || $userId <= 0) {
             throw new TypstRuntimeException(self::MESSAGE_AUTHENTICATION_REQUIRED);
         }
+        // Materialise the caller's user-principal so visibility
+        // checks have a row to anchor on. Without this, the first
+        // GET in a session (when no principal-tier row exists yet
+        // for this user) returns [] from visiblePrincipalIdsFor()
+        // and the chip-row's ?principal_id falls outside that
+        // empty set → 404 on what should be the user's own scope.
+        $this->principals->ensureUserPrincipal($userId);
         try {
             $principalId = $this->resolvePrincipalId($request, $userId);
         } catch (RuntimeException $e) {
