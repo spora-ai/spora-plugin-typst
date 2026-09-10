@@ -132,11 +132,6 @@ abstract class AbstractTypstTextResourceController
     {
         try {
             $name = (string) $request->attributes->get('name', '');
-            if ($name === '') {
-                throw new ResourceValidationFailed(
-                    $this->unprocessable('VALIDATION_ERROR', 'name is required in the URL'),
-                );
-            }
             $store = $this->storeForRequest($request);
             $content = $this->parseUpdateContent($request);
             $path = $store->write($this->kind(), $name, $content);
