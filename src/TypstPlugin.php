@@ -116,7 +116,7 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
     }
 
     /**
-     * Register the nine `/api/v1/typst/*` routes behind Auth + CSRF.
+     * Register the 25 `/api/v1/typst/*` routes behind Auth + CSRF.
      * Mirrors the spora-plugin-memories auth chain verbatim so the
      * admin UI's fetch() calls Just Work.
      */
