@@ -506,3 +506,95 @@ it('POST /typst/compile returns 422 COMPILATION_FAILED with the typst-compile pr
     expect($body['error']['message'])->toStartWith('typst compile:');
     expect($body['error']['message'])->toContain('internal producer state inconsistency');
 });
+
+it('POST /typst/compile?principal_id=<group> writes the parent row under the group principal (regression: #include under a group)', function (): void {
+    // The materialised media_assets row's principal_id must be the
+    // group principal — would have been the caller's user-principal
+    // before this fix.
+    $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
+    $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $producer->shouldReceive('operationName')->andReturn('typst.playground');
+    $producer->shouldReceive('produce')->andReturn(
+        new Spora\Services\MediaArchive\DerivativeOutput('%PDF-1.4 fake', 'application/pdf'),
+    );
+
+    $controller = buildStubProducerController(
+        $this->auth,
+        $this->principalService,
+        $this->derivativeService,
+        $this->worldFactory,
+        $producer,
+    );
+
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'CompileControllerGroup');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+    expect($groupPrincipalId)->not->toBe($userPrincipalId);
+
+    $req = Request::create(
+        COMPILE_PATH . '?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
+        content: json_encode(['source' => '= Group render', 'format' => 'pdf']),
+    );
+
+    $resp = $controller->compile($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $parentRow = Illuminate\Database\Capsule\Manager::table('media_assets')
+        ->where('tool_name', 'typst.playground')
+        ->orderByDesc('created_at')
+        ->first();
+    expect($parentRow)->not->toBeNull();
+    expect((int) $parentRow->principal_id)->toBe($groupPrincipalId);
+});
+
+it('POST /typst/compile?principal_id=<out-of-scope> falls back to the user-principal', function (): void {
+    // Same fallback contract as the resource controllers — an
+    // out-of-scope principal_id silently downgrades to the caller.
+    $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
+    $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
+    $producer->shouldReceive('operationName')->andReturn('typst.playground');
+    $producer->shouldReceive('produce')->andReturn(
+        new Spora\Services\MediaArchive\DerivativeOutput('%PDF-1.4 fake', 'application/pdf'),
+    );
+
+    $controller = buildStubProducerController(
+        $this->auth,
+        $this->principalService,
+        $this->derivativeService,
+        $this->worldFactory,
+        $producer,
+    );
+
+    $callerUserId = (int) $this->auth->currentUserId();
+    $callerPrincipalId = (int) $this->principalService->ensureUserPrincipal($callerUserId)->id;
+
+    // Register an outsider with their own user-principal.
+    $this->auth->logOut();
+    clearSession();
+    $outsiderId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $outsiderPrincipalId = (int) $this->principalService->ensureUserPrincipal($outsiderId)->id;
+
+    // Back to the caller, asking for the outsider's principal.
+    simulateLoggedInSession($callerUserId, 'tester@example.com');
+
+    $req = Request::create(
+        COMPILE_PATH . '?principal_id=' . $outsiderPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => COMPILE_JSON_MIME],
+        content: json_encode(['source' => '= Outsider render', 'format' => 'pdf']),
+    );
+
+    $resp = $controller->compile($req);
+    expect($resp->getStatusCode())->toBe(200);
+
+    $parentRow = Illuminate\Database\Capsule\Manager::table('media_assets')
+        ->where('tool_name', 'typst.playground')
+        ->orderByDesc('created_at')
+        ->first();
+    expect($parentRow)->not->toBeNull();
+    expect((int) $parentRow->principal_id)->toBe($callerPrincipalId);
+});

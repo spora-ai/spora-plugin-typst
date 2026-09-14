@@ -95,7 +95,7 @@ final class TypstCompileController
                     Response::HTTP_SERVICE_UNAVAILABLE,
                 );
             }
-            return $this->runCompile($producer, $inputs, $this->resolveContext($userId), $userId);
+            return $this->runCompile($producer, $inputs, $this->resolveContext($request, $userId), $userId);
         } catch (CompileInputValidation $e) {
             return $e->response;
         }
@@ -305,20 +305,46 @@ final class TypstCompileController
     }
 
     /**
-     * Mirrors {@see MediaDerivativeController::resolveContext()}: the
-     * principal is the caller's user-principal; both owner and runner
-     * id are the caller. Uses {@see PrincipalService::ensureUserPrincipal()}
-     * to materialise the row on demand (idempotent — same id every call).
+     * Honour `?principal_id=N` when the requested principal is in the
+     * caller's visible-principals set; otherwise fall back to the
+     * user-principal. The world factory builds `template_dir` from
+     * this principal — `#include "examples/foo.typ"` resolves under
+     * `<storage>/typst/<principal>/`, so a wrong principal surfaces
+     * as "file not found".
+     *
+     * `ownerUserId` / `runnerUserId` stay pinned to the caller for
+     * HTTP-driven renders; the divergence case goes through
+     * {@see \Spora\Services\PrincipalResolver::resolveForToolExecute()}.
      */
-    private function resolveContext(int $userId): PrincipalContext
+    private function resolveContext(Request $request, int $userId): PrincipalContext
     {
-        $principal = $this->principals->ensureUserPrincipal($userId);
+        $principal = $this->resolvePrincipal($request, $userId);
         return new PrincipalContext(
             principalId: (int) $principal->id,
             type: (string) $principal->type,
             ownerUserId: $userId,
             runnerUserId: $userId,
         );
+    }
+
+    /**
+     * Mirrors {@see AbstractTypstTextResourceController::resolvePrincipalId()}
+     * so a `?principal_id` that doesn't belong to the caller is treated
+     * the same way as a missing one across every typst endpoint.
+     */
+    private function resolvePrincipal(Request $request, int $userId): \Spora\Models\Principal
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested !== null && $requested !== '') {
+            $requestedId = (int) $requested;
+            if ($requestedId > 0 && in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+                $principal = \Spora\Models\Principal::query()->find($requestedId);
+                if ($principal !== null) {
+                    return $principal;
+                }
+            }
+        }
+        return $this->principals->ensureUserPrincipal($userId);
     }
 
     /**
