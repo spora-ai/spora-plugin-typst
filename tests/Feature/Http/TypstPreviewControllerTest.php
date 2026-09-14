@@ -274,16 +274,8 @@ it('POST /typst/preview returns 503 when no producer is registered', function ()
 });
 
 it('POST /typst/preview?principal_id=<group> forwards the group principal to the producer (regression: #include under a group)', function (): void {
-    // Regression for the Editor-tab 404 on `#include "examples/foo.typ"`
-    // when the operator was acting under a group scope. Preview used
-    // to ignore `?principal_id` and always fall back to the caller's
-    // user-principal, so the world factory's `template_dir` pointed
-    // at the user's personal directory while the example lived under
-    // the group's directory.
-    //
-    // The smoking gun is the `principalId` argument the controller
-    // forwards to `$producer->produceFromString()` — it must equal
-    // the group principal, not the user's.
+    // Preview doesn't persist a row, so the principalId forwarded to
+    // produceFromString() is the only signal the world factory gets.
     $captured = ['principalId' => null];
     $producer = Mockery::mock(TypstPreviewProducerInterface::class);
     $producer->shouldReceive('produceFromString')
@@ -319,10 +311,7 @@ it('POST /typst/preview?principal_id=<group> forwards the group principal to the
 });
 
 it('POST /typst/preview?principal_id=<out-of-scope> forwards the user-principal', function (): void {
-    // Same fallback contract as the resource controllers: an outsider's
-    // principal_id is silently substituted with the caller's user-principal.
-    // The Editor tab doesn't have to render the error explicitly — the
-    // wrong template_dir would just produce a "file not found" anyway.
+    // Same fallback contract as the resource controllers.
     $captured = ['principalId' => null];
     $producer = Mockery::mock(TypstPreviewProducerInterface::class);
     $producer->shouldReceive('produceFromString')

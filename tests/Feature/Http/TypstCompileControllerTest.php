@@ -508,17 +508,9 @@ it('POST /typst/compile returns 422 COMPILATION_FAILED with the typst-compile pr
 });
 
 it('POST /typst/compile?principal_id=<group> writes the parent row under the group principal (regression: #include under a group)', function (): void {
-    // Regression for the Editor-tab 404 on `#include "examples/foo.typ"`
-    // when the operator was acting under a group scope. The compile
-    // endpoint used to ignore `?principal_id` and always fall back to
-    // the caller's user-principal, so the world factory's
-    // `template_dir` pointed at the user's personal directory while
-    // the example lived under the group's directory. The inspector
-    // then reported "file not found" and the render aborted.
-    //
-    // The smoking gun is the materialised `media_assets` row's
-    // `principal_id` — it must be the group principal, not the
-    // user's.
+    // The materialised media_assets row's principal_id must be the
+    // group principal — would have been the caller's user-principal
+    // before this fix.
     $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
     $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
     $producer->shouldReceive('operationName')->andReturn('typst.playground');
@@ -560,11 +552,8 @@ it('POST /typst/compile?principal_id=<group> writes the parent row under the gro
 });
 
 it('POST /typst/compile?principal_id=<out-of-scope> falls back to the user-principal', function (): void {
-    // An outsider's principal_id is not in the caller's
-    // `visiblePrincipalIdsFor()`. Same behaviour as the resource
-    // controllers' `?principal_id` resolver: silently fall back to
-    // the caller's user-principal rather than 403/404. The caller
-    // never sees the outsider's library.
+    // Same fallback contract as the resource controllers — an
+    // out-of-scope principal_id silently downgrades to the caller.
     $producer = Mockery::mock(MediaDerivativeProducerInterface::class);
     $producer->shouldReceive('pluginSlug')->andReturn('spora-plugin-typst');
     $producer->shouldReceive('operationName')->andReturn('typst.playground');

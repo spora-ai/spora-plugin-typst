@@ -237,18 +237,10 @@ final class TypstPreviewController
     }
 
     /**
-     * Honour `?principal_id=N` when the requested principal is in the
-     * caller's visible-principals set (their own user-principal or
-     * any group-principal they're a member of); otherwise fall back
-     * to the caller's user-principal. Same fix as
-     * {@see TypstCompileController::resolveContext()} — without it,
-     * `#include "examples/foo.typ"` resolves under the caller's
-     * personal directory instead of the group where the example was
-     * uploaded, and the inspector reports "file not found".
-     *
-     * `ownerUserId` and `runnerUserId` both stay pinned to the caller
-     * for HTTP-driven renders — the divergence case (agent owner ≠
-     * executor) only arises through {@see PrincipalResolver::resolveForToolExecute()}.
+     * Mirrors {@see TypstCompileController::resolveContext()} — preview
+     * is the no-DB-write surface, so the `?principal_id` fix is what
+     * lets `#include "examples/foo.typ"` resolve under a group
+     * principal without an inspector "file not found".
      */
     private function resolveContext(Request $request, int $userId): PrincipalContext
     {

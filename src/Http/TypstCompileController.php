@@ -305,24 +305,16 @@ final class TypstCompileController
     }
 
     /**
-     * Resolve the principal context for this request. Honours
-     * `?principal_id=N` when the requested principal is in the
-     * caller's visible-principals set (their own user-principal or
-     * any group-principal they're a member of); otherwise falls
-     * back to the caller's user-principal.
+     * Honour `?principal_id=N` when the requested principal is in the
+     * caller's visible-principals set; otherwise fall back to the
+     * user-principal. The world factory builds `template_dir` from
+     * this principal — `#include "examples/foo.typ"` resolves under
+     * `<storage>/typst/<principal>/`, so a wrong principal surfaces
+     * as "file not found".
      *
-     * The compile path needs the right principal because the world
-     * factory builds `template_dir` from it — `#include "examples/foo.typ"`
-     * resolves under `<storage>/typst/<principal>/examples/`, and if
-     * the compile ran under the caller's user-principal while the
-     * example was uploaded under a group-principal, the world would
-     * look at the wrong directory and the inspector would report
-     * "file not found".
-     *
-     * `ownerUserId` and `runnerUserId` both stay pinned to the caller
-     * for HTTP-driven renders — agent-driven flows (where they can
-     * diverge) go through {@see \Spora\Services\PrincipalResolver::resolveForToolExecute()}
-     * instead.
+     * `ownerUserId` / `runnerUserId` stay pinned to the caller for
+     * HTTP-driven renders; the divergence case goes through
+     * {@see \Spora\Services\PrincipalResolver::resolveForToolExecute()}.
      */
     private function resolveContext(Request $request, int $userId): PrincipalContext
     {
@@ -336,10 +328,7 @@ final class TypstCompileController
     }
 
     /**
-     * Pick the principal row for the request: honour `?principal_id` if
-     * it's visible to the caller, otherwise materialise the user's
-     * personal principal. Mirrors
-     * {@see AbstractTypstTextResourceController::resolvePrincipalId()}
+     * Mirrors {@see AbstractTypstTextResourceController::resolvePrincipalId()}
      * so a `?principal_id` that doesn't belong to the caller is treated
      * the same way as a missing one across every typst endpoint.
      */
