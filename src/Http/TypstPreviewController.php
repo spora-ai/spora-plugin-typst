@@ -97,7 +97,7 @@ final class TypstPreviewController
                     Response::HTTP_SERVICE_UNAVAILABLE,
                 );
             }
-            return $this->runPreview($producer, $inputs, $this->resolveContext($userId));
+            return $this->runPreview($producer, $inputs, $this->resolveContext($request, $userId));
         } catch (CompileInputValidation $e) {
             return $e->response;
         }
@@ -237,21 +237,42 @@ final class TypstPreviewController
     }
 
     /**
-     * Mirrors {@see TypstCompileController::resolveContext()} — the
-     * preview's principal is the caller's user-principal, both owner
-     * and runner are the caller. Uses
-     * {@see PrincipalService::ensureUserPrincipal()} so the row is
-     * materialised idempotently (same id every call) without forcing
-     * the caller to pre-create one.
+     * Honour `?principal_id=N` when the requested principal is in the
+     * caller's visible-principals set (their own user-principal or
+     * any group-principal they're a member of); otherwise fall back
+     * to the caller's user-principal. Same fix as
+     * {@see TypstCompileController::resolveContext()} — without it,
+     * `#include "examples/foo.typ"` resolves under the caller's
+     * personal directory instead of the group where the example was
+     * uploaded, and the inspector reports "file not found".
+     *
+     * `ownerUserId` and `runnerUserId` both stay pinned to the caller
+     * for HTTP-driven renders — the divergence case (agent owner ≠
+     * executor) only arises through {@see PrincipalResolver::resolveForToolExecute()}.
      */
-    private function resolveContext(int $userId): PrincipalContext
+    private function resolveContext(Request $request, int $userId): PrincipalContext
     {
-        $principal = $this->principals->ensureUserPrincipal($userId);
+        $principal = $this->resolvePrincipal($request, $userId);
         return new PrincipalContext(
             principalId: (int) $principal->id,
             type: (string) $principal->type,
             ownerUserId: $userId,
             runnerUserId: $userId,
         );
+    }
+
+    private function resolvePrincipal(Request $request, int $userId): \Spora\Models\Principal
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested !== null && $requested !== '') {
+            $requestedId = (int) $requested;
+            if ($requestedId > 0 && in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+                $principal = \Spora\Models\Principal::query()->find($requestedId);
+                if ($principal !== null) {
+                    return $principal;
+                }
+            }
+        }
+        return $this->principals->ensureUserPrincipal($userId);
     }
 }

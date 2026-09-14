@@ -95,7 +95,7 @@ final class TypstCompileController
                     Response::HTTP_SERVICE_UNAVAILABLE,
                 );
             }
-            return $this->runCompile($producer, $inputs, $this->resolveContext($userId), $userId);
+            return $this->runCompile($producer, $inputs, $this->resolveContext($request, $userId), $userId);
         } catch (CompileInputValidation $e) {
             return $e->response;
         }
@@ -305,20 +305,57 @@ final class TypstCompileController
     }
 
     /**
-     * Mirrors {@see MediaDerivativeController::resolveContext()}: the
-     * principal is the caller's user-principal; both owner and runner
-     * id are the caller. Uses {@see PrincipalService::ensureUserPrincipal()}
-     * to materialise the row on demand (idempotent — same id every call).
+     * Resolve the principal context for this request. Honours
+     * `?principal_id=N` when the requested principal is in the
+     * caller's visible-principals set (their own user-principal or
+     * any group-principal they're a member of); otherwise falls
+     * back to the caller's user-principal.
+     *
+     * The compile path needs the right principal because the world
+     * factory builds `template_dir` from it — `#include "examples/foo.typ"`
+     * resolves under `<storage>/typst/<principal>/examples/`, and if
+     * the compile ran under the caller's user-principal while the
+     * example was uploaded under a group-principal, the world would
+     * look at the wrong directory and the inspector would report
+     * "file not found".
+     *
+     * `ownerUserId` and `runnerUserId` both stay pinned to the caller
+     * for HTTP-driven renders — agent-driven flows (where they can
+     * diverge) go through {@see \Spora\Services\PrincipalResolver::resolveForToolExecute()}
+     * instead.
      */
-    private function resolveContext(int $userId): PrincipalContext
+    private function resolveContext(Request $request, int $userId): PrincipalContext
     {
-        $principal = $this->principals->ensureUserPrincipal($userId);
+        $principal = $this->resolvePrincipal($request, $userId);
         return new PrincipalContext(
             principalId: (int) $principal->id,
             type: (string) $principal->type,
             ownerUserId: $userId,
             runnerUserId: $userId,
         );
+    }
+
+    /**
+     * Pick the principal row for the request: honour `?principal_id` if
+     * it's visible to the caller, otherwise materialise the user's
+     * personal principal. Mirrors
+     * {@see AbstractTypstTextResourceController::resolvePrincipalId()}
+     * so a `?principal_id` that doesn't belong to the caller is treated
+     * the same way as a missing one across every typst endpoint.
+     */
+    private function resolvePrincipal(Request $request, int $userId): \Spora\Models\Principal
+    {
+        $requested = $request->query->get('principal_id');
+        if ($requested !== null && $requested !== '') {
+            $requestedId = (int) $requested;
+            if ($requestedId > 0 && in_array($requestedId, $this->principals->visiblePrincipalIdsFor($userId), true)) {
+                $principal = \Spora\Models\Principal::query()->find($requestedId);
+                if ($principal !== null) {
+                    return $principal;
+                }
+            }
+        }
+        return $this->principals->ensureUserPrincipal($userId);
     }
 
     /**

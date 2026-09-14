@@ -272,3 +272,90 @@ it('POST /typst/preview returns 503 when no producer is registered', function ()
     expect($resp->getStatusCode())->toBe(503);
     expect(json_decode((string) $resp->getContent(), true)['error']['code'])->toBe('PRODUCER_UNAVAILABLE');
 });
+
+it('POST /typst/preview?principal_id=<group> forwards the group principal to the producer (regression: #include under a group)', function (): void {
+    // Regression for the Editor-tab 404 on `#include "examples/foo.typ"`
+    // when the operator was acting under a group scope. Preview used
+    // to ignore `?principal_id` and always fall back to the caller's
+    // user-principal, so the world factory's `template_dir` pointed
+    // at the user's personal directory while the example lived under
+    // the group's directory.
+    //
+    // The smoking gun is the `principalId` argument the controller
+    // forwards to `$producer->produceFromString()` — it must equal
+    // the group principal, not the user's.
+    $captured = ['principalId' => null];
+    $producer = Mockery::mock(TypstPreviewProducerInterface::class);
+    $producer->shouldReceive('produceFromString')
+        ->andReturnUsing(function (string $source, string $format, ?int $principalId, array $options = []) use (&$captured) {
+            $captured['principalId'] = $principalId;
+            return new DerivativeOutput('PDFBYTES', 'application/pdf');
+        });
+
+    $controller = new TypstPreviewController(
+        $this->auth,
+        $this->principalService,
+        $this->worldFactory,
+        producerFactory: static fn(): TypstPreviewProducerInterface => $producer,
+    );
+
+    $userId = (int) $this->auth->currentUserId();
+    $userPrincipalId = (int) $this->principalService->ensureUserPrincipal($userId)->id;
+    $groupService = new Spora\Services\GroupService($this->principalService);
+    $group = $groupService->createGroup($userId, 'PreviewControllerGroup');
+    $groupPrincipalId = (int) $this->principalService->ensureGroupPrincipal((int) $group->id)->id;
+    expect($groupPrincipalId)->not->toBe($userPrincipalId);
+
+    $req = Request::create(
+        PREVIEW_PATH . '?principal_id=' . $groupPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME],
+        content: json_encode(['source' => '= Group render', 'format' => 'pdf']),
+    );
+
+    $resp = $controller->preview($req);
+    expect($resp->getStatusCode())->toBe(200);
+    expect($captured['principalId'])->toBe($groupPrincipalId);
+});
+
+it('POST /typst/preview?principal_id=<out-of-scope> forwards the user-principal', function (): void {
+    // Same fallback contract as the resource controllers: an outsider's
+    // principal_id is silently substituted with the caller's user-principal.
+    // The Editor tab doesn't have to render the error explicitly — the
+    // wrong template_dir would just produce a "file not found" anyway.
+    $captured = ['principalId' => null];
+    $producer = Mockery::mock(TypstPreviewProducerInterface::class);
+    $producer->shouldReceive('produceFromString')
+        ->andReturnUsing(function (string $source, string $format, ?int $principalId, array $options = []) use (&$captured) {
+            $captured['principalId'] = $principalId;
+            return new DerivativeOutput('PDFBYTES', 'application/pdf');
+        });
+
+    $controller = new TypstPreviewController(
+        $this->auth,
+        $this->principalService,
+        $this->worldFactory,
+        producerFactory: static fn(): TypstPreviewProducerInterface => $producer,
+    );
+
+    $callerUserId = (int) $this->auth->currentUserId();
+    $callerPrincipalId = (int) $this->principalService->ensureUserPrincipal($callerUserId)->id;
+
+    $this->auth->logOut();
+    clearSession();
+    $outsiderId = $this->auth->register('outsider@example.com', 'Password1!', 'Outsider');
+    $outsiderPrincipalId = (int) $this->principalService->ensureUserPrincipal($outsiderId)->id;
+
+    simulateLoggedInSession($callerUserId, 'tester@example.com');
+
+    $req = Request::create(
+        PREVIEW_PATH . '?principal_id=' . $outsiderPrincipalId,
+        'POST',
+        server: ['CONTENT_TYPE' => PREVIEW_JSON_MIME],
+        content: json_encode(['source' => '= Outsider render', 'format' => 'pdf']),
+    );
+
+    $resp = $controller->preview($req);
+    expect($resp->getStatusCode())->toBe(200);
+    expect($captured['principalId'])->toBe($callerPrincipalId);
+});
