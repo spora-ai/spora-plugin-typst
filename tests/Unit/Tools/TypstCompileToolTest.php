@@ -903,10 +903,10 @@ describe('inspect path', function (): void {
 });
 
 /**
- * `typst_compile.file` is polymorphic: a media-asset UUID OR a
- * basename under the principal's `templates/` / `examples/` tree.
- * Lets the LLM render a file uploaded via `typst_resources.write`
- * without round-tripping through the media archive.
+ * `typst_compile.file` is polymorphic (UUID or basename under the
+ * principal's `templates/` / `examples/`) so an LLM can render a
+ * file uploaded via `typst_resources.write` without round-tripping
+ * through the media archive.
  */
 describe('typst_compile.file is polymorphic (UUID OR basename)', function (): void {
     it('declares source and file as required: false in the tool schema', function (): void {
@@ -1000,12 +1000,8 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
     });
 
     it('renders file=<basename> under templates/ without crashing producePersistOrThrow() (regression)', function (): void {
-        // Repro: Tom's render path. With the previous fix, inspect
-        // with file=<basename> worked but render crashed at
-        // producePersistOrThrow() because the filesystem fallback
-        // returned parent: null. The render path needs a
-        // MediaAsset parent for both the derivative FK and the
-        // playground picker, so resolveSourceForRender() now
+        // The render path needs a MediaAsset parent for both the
+        // derivative FK and the playground picker; resolveSourceForRender()
         // materialises one from the filesystem bytes.
         $basename = 'teaser.typ';
         $bytes    = "= Teaser\n#set page(width: 1080pt, height: 1080pt)\n";

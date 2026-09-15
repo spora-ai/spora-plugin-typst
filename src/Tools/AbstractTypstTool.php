@@ -129,10 +129,6 @@ abstract class AbstractTypstTool extends AbstractTool
 
         if (is_string($fileId) && $fileId !== '') {
             $loaded = $this->loadAssetSource($fileId, $context, $userId);
-            // UUID path returns the existing MediaAsset; the basename
-            // (templates/ / examples/) path returns parent: null and we
-            // materialise a fresh parent here so the render path's
-            // derivative FK and the playground picker both have a row.
             if ($loaded['parent'] !== null) {
                 return $loaded;
             }
@@ -186,9 +182,7 @@ abstract class AbstractTypstTool extends AbstractTool
      *
      * `parent` is the matched `MediaAsset` for UUID lookups and
      * `null` for filesystem lookups — the render path's caller
-     * materialises a fresh parent row from the bytes so the
-     * derivative FK and the playground picker both have something
-     * to point at.
+     * materialises a fresh parent from the bytes.
      */
     private function loadAssetSource(string $fileId, ?PrincipalContext $context, ?int $userId): array
     {
