@@ -57,27 +57,27 @@ use Throwable;
 )]
 #[ToolOperation(
     name: 'render',
-    description: 'Compile Typst source to PDF/PNG/SVG using ext-typst and persist the result as a media-derivative. format: pdf (default) | png | svg. Provide source as inline string or `file` (media asset id of a .typ file).',
+    description: 'Compile Typst source to PDF/PNG/SVG using ext-typst and persist the result as a media-derivative. format: pdf (default) | png | svg. Provide one of `source` (inline string) or `file` (media-asset UUID OR basename under templates/ / examples/).',
     enabledByDefault: true,
     requiresApprovalByDefault: true,
 )]
 #[ToolOperation(
     name: 'inspect',
-    description: 'Run a read-only inspector pass on Typst source. Returns the structured error and warning list from ext-typst\'s Inspector without producing any output or media-derivative. Cheaper than render — use as a first pass on a new source. Provide source as inline string or `file` (media asset id of a .typ file).',
+    description: 'Run a read-only inspector pass on Typst source. Returns the structured error and warning list from ext-typst\'s Inspector without producing any output or media-derivative. Cheaper than render — use as a first pass on a new source. Provide one of `source` (inline string) or `file` (media-asset UUID OR basename under templates/ / examples/).',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
     name: 'source',
     type: 'string',
-    description: 'Inline Typst source. Provide one of `source` or `file`.',
-    required: ['render', 'inspect'],
+    description: 'Inline Typst source. Provide one of `source` or `file` (at least one is required at runtime — the schema marks both optional so the LLM driver does not coerce empty strings into other types).',
+    required: false,
 )]
 #[ToolParameter(
     name: 'file',
     type: 'string',
-    description: 'Media asset id of a previously-uploaded .typ file. Provide one of `source` or `file`.',
-    required: ['render', 'inspect'],
+    description: 'Polymorphic `.typ` reference: a media-asset UUID OR a basename under the caller\'s `templates/` or `examples/` (resolved per principal — `typst_resources.write` writes to one of those directories). Provide one of `source` or `file`.',
+    required: false,
 )]
 #[ToolParameter(
     name: 'format',
