@@ -104,7 +104,10 @@ abstract class AbstractTypstTool extends AbstractTool
      * call. Inline `source` uses the LLM-supplied `filename` (or an
      * auto-generated `inline-YYYYMMDD-HHMMSS-XXXX.typ` when omitted)
      * as the playground pool row name; `file=<id>` reuses the
-     * existing parent and ignores `filename` if also supplied.
+     * existing parent and ignores `filename` if also supplied;
+     * `file=<basename>` materialises a fresh parent from the
+     * principal's `templates/` or `examples/` bytes so the
+     * derivative FK and the file picker both have a row.
      *
      * Auto-defaulting the filename was added because LLMs
      * habitually reach for `file` when they mean a basename and the
@@ -125,7 +128,19 @@ abstract class AbstractTypstTool extends AbstractTool
         $fileId = $arguments['file'] ?? null;
 
         if (is_string($fileId) && $fileId !== '') {
-            return $this->loadAssetSource($fileId, $context, $userId);
+            $loaded = $this->loadAssetSource($fileId, $context, $userId);
+            if ($loaded['parent'] !== null) {
+                return $loaded;
+            }
+            $name = TypstFilename::sanitise($fileId, 'inline.typ');
+            $parent = $this->materialiseNamedInlineSource(
+                $loaded['bytes'],
+                $name,
+                $agentId,
+                $userId,
+                $context,
+            );
+            return ['bytes' => $loaded['bytes'], 'parent' => $parent];
         }
 
         if (is_string($source) && $source !== '') {
@@ -139,7 +154,7 @@ abstract class AbstractTypstTool extends AbstractTool
         }
 
         throw new TypstInvalidArgumentException(
-            'Typst tool: either `source` (inline string) or `file` (media asset id) is required',
+            'Typst tool: either `source` (inline string) or `file` (media asset id or basename under templates/ / examples/) is required',
         );
     }
 
@@ -158,31 +173,86 @@ abstract class AbstractTypstTool extends AbstractTool
         return sprintf('inline-%s-%s.typ', date('Ymd-His'), bin2hex(random_bytes(2)));
     }
 
+    /**
+     * Polymorphic lookup: tries `media_assets` first (canonical
+     * UUID), then falls back to the principal's `templates/` then
+     * `examples/` filesystem so an LLM can pass the basename of a
+     * file uploaded via `typst_resources.write` without round-
+     * tripping through the media archive.
+     *
+     * `parent` is the matched `MediaAsset` for UUID lookups and
+     * `null` for filesystem lookups — the render path's caller
+     * materialises a fresh parent from the bytes.
+     */
     private function loadAssetSource(string $fileId, ?PrincipalContext $context, ?int $userId): array
     {
         $asset = MediaAsset::query()->find($fileId);
-        if ($asset === null) {
-            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not found', $fileId));
-        }
-        if (!$this->assetIsVisibleTo($asset, $context, $userId)) {
-            throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
+        if ($asset !== null) {
+            if (!$this->assetIsVisibleTo($asset, $context, $userId)) {
+                throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
+            }
+            $bytes = match ($asset->storage_mode) {
+                'data_url' => is_string($asset->payload) ? $asset->payload : '',
+                'local'    => $this->readLocalAsset($asset),
+                default    => throw new TypstRuntimeException(sprintf(
+                    'Typst tool: cannot read storage_mode "%s"',
+                    (string) $asset->storage_mode,
+                )),
+            };
+            if ($bytes === '') {
+                throw new TypstRuntimeException('Typst tool: asset has empty bytes');
+            }
+            return [
+                'bytes'  => $bytes,
+                'parent' => $asset,
+            ];
         }
 
-        $bytes = match ($asset->storage_mode) {
-            'data_url' => is_string($asset->payload) ? $asset->payload : '',
-            'local'    => $this->readLocalAsset($asset),
-            default    => throw new TypstRuntimeException(sprintf(
-                'Typst tool: cannot read storage_mode "%s"',
-                (string) $asset->storage_mode,
-            )),
-        };
-        if ($bytes === '') {
-            throw new TypstRuntimeException('Typst tool: asset has empty bytes');
+        // Filesystem fallback for files written via typst_resources.write
+        // (playground sources live in media_assets; templates/examples
+        // live on disk).
+        $basenameBytes = $this->loadFromPrincipalFilesystem($fileId, $context);
+        if ($basenameBytes !== null) {
+            return [
+                'bytes'  => $basenameBytes,
+                'parent' => null,
+            ];
         }
-        return [
-            'bytes'  => $bytes,
-            'parent' => $asset,
-        ];
+
+        throw new TypstRuntimeException(sprintf(
+            'Typst tool: file "%s" not found (checked media_assets by UUID, then templates/ and examples/ under principal %s)',
+            $fileId,
+            $context !== null ? (string) $context->principalId : '(none)',
+        ));
+    }
+
+    /**
+     * Templates first, then examples — `typst_resources.write` puts
+     * LLM-authored `.typ` files in `templates/`, not `examples/`.
+     */
+    private function loadFromPrincipalFilesystem(string $basename, ?PrincipalContext $context): ?string
+    {
+        if ($context === null || $context->principalId <= 0) {
+            return null;
+        }
+        $resourcePaths = new \Spora\Plugins\Typst\Services\TypstResourcePaths($this->paths(), $context->principalId);
+        $store = new \Spora\Plugins\Typst\Services\TypstResourceStore($resourcePaths);
+        foreach ([
+            \Spora\Plugins\Typst\Services\TypstResourcePaths::KIND_TEMPLATE,
+            \Spora\Plugins\Typst\Services\TypstResourcePaths::KIND_EXAMPLE,
+        ] as $kind) {
+            try {
+                $bytes = $store->read($kind, $basename);
+                if ($bytes !== null) {
+                    return $bytes;
+                }
+            } catch (TypstRuntimeException) {
+                // Basename failed charset validation — skip to the
+                // next kind; the 'not found' error from the caller
+                // covers the final surface.
+            }
+        }
+        return null;
     }
 
     /**

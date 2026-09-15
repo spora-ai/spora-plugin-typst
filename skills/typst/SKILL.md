@@ -4,7 +4,7 @@ description: "When the user asks for a typeset document, a PDF report, a slide d
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.2"
+  version: "1.3"
   allowedByDefault: false
   requiresTools: "typst_compile,typst_resources"
 ---
@@ -50,19 +50,25 @@ For routine compiles, the flow is `typst_compile(action: "inspect")` → fix →
 // when omitted, the tool picks `inline-YYYYMMDD-HHMMSS-XXXX.typ` for you
 { "source": "= Hello\n", "filename": "letter.typ", "format": "pdf" }
 
-// file — a media asset id previously uploaded as .typ (distinct from filename — file is a UUID)
-{ "file": "01HXYZ...", "format": "png", "page": 0 }
+// file — polymorphic: a media-asset UUID OR a basename under the caller's
+// templates/ or examples/ (resolved per principal — `typst_resources.write`
+// puts files in one of those directories, so the basename you uploaded
+// there is just as valid as a UUID).
+{ "file": "01HXYZ...",                    "format": "png", "page": 0 }
+{ "file": "webinar-single-post.typ",      "format": "png", "ppi": 72 }
 ```
+
+Both `source` and `file` are schema-optional (the runtime refuses the call only if both are empty). `file=""` is accepted — the runtime treats it as "no file supplied" and falls back to `source`.
 
 Default to inline. Switch to `file` when:
 
-- The user uploaded a `.typ` asset specifically to iterate on.
 - The source is bigger than ~4 KB (paste limit).
-- You want the natural-key idempotency of `media_derivatives` (re-rendering the same `file` with the same `format` refreshes the existing row instead of stacking duplicates).
+- You want the natural-key idempotency of `media_derivatives` for a previously-uploaded `.typ` asset (re-rendering the same `file` with the same `format` refreshes the existing row instead of stacking duplicates).
+- You uploaded the `.typ` via `typst_resources.write` and want to render it back without round-tripping through `media_assets` — pass the basename you uploaded it under.
 
-`filename` is **optional** when `action="render"` is called with inline `source`. Pick a basename the user can recognise in the playground picker — `"letter.typ"`, `"cover-letter.typ"`, `"playground.typ"` — or omit it and the tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` name. The auto-name keeps the row findable in the file picker, so the previous "orphan parent" failure mode is gone without forcing every call to invent a basename. Two renders with the same `filename` produce sibling rows (the previous in-place overwrite behaviour is gone) so the user can compare revisions; the file picker surfaces both.
+`filename` is **optional** when `action="render"` is called with inline `source`. Pick a basename the operator can recognise in the playground picker — `"letter.typ"`, `"cover-letter.typ"`, `"playground.typ"` — or omit it and the tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` name. The auto-name keeps the row findable in the file picker, so the previous "orphan parent" failure mode is gone without forcing every call to invent a basename. Two renders with the same `filename` produce sibling rows (the previous in-place overwrite behaviour is gone) so the operator can compare revisions; the file picker surfaces both.
 
-> **`file` and `filename` are distinct keys.** `file` carries a media-asset UUID (the result of a prior `.typ` upload); `filename` carries a free-form basename that labels the row materialised from inline source. LLMs that reach for `<file>letter.typ</file>` when they mean a basename used to hit a hard validator error before any of our code ran — that path now auto-defaults. Don't conflate them: when you have a UUID, use `file`; when you have inline bytes you want to label, use `filename` (or omit it).
+> **`file` and `filename` are distinct keys.** `file` references an existing source (UUID or basename); `filename` labels the row materialised from inline source. When you have inline bytes you want to label, use `source` + `filename` (or omit `filename`). When you have a UUID, pass it as `file`. When you have a basename under the caller's `templates/` or `examples/`, pass it as `file` — the tool will resolve it per principal.
 
 `inspect` never persists. It runs `inspectString($bytes)` only and returns the structured diagnostics; no `MediaAsset` row is written, so an inspect call cannot leave orphan rows. A `filename` on an inspect call is ignored — `filename` is render-only.
 
@@ -93,6 +99,8 @@ When the inspector reports errors, the producer refuses to render — the tool's
 When the inspector reports warnings only, the producer still renders — the warnings appear in the tool's `ok` content so you can decide whether to iterate.
 
 When the producer throws an unrelated exception (font unreadable, invalid source bytes), the tool returns the exception's message in `error`. The most common cause for fresh installs is missing tier-2 fonts — list them with `typst_resources(action="resources_list", kind="font")` and either upload the missing one or fall back to the bundled fonts.
+
+When `file=` doesn't match anything the tool can read, the error names both lookup paths: `media_assets` (UUID match), then `templates/` and `examples/` under the caller's principal (basename match). If you uploaded the `.typ` via `typst_resources.write` and the error fires, the caller's principal probably isn't the one you uploaded under — switch the chip row to the original principal before retrying.
 
 ## Rendering
 
@@ -315,8 +323,16 @@ typst_compile(action: "render", source: "= ...\n#let x = 1\n#for i in range(1, 5
 
 ### Render from an uploaded .typ file
 
+`file=` is polymorphic: a media-asset UUID (the result of a prior upload through `media_assets`) OR a basename under the caller's `templates/` / `examples/` (the result of a prior `typst_resources.write`).
+
 ```jsonc
+// UUID path — a previously-uploaded .typ asset
 typst_compile(action: "render", file: "01HXYZ_TYPSOURCE_UUID", format: "svg", page: 2)
+
+// Basename path — a .typ uploaded via typst_resources.write under
+// templates/ or examples/. Resolved per principal — switch the chip
+// row if you uploaded it under a different group.
+typst_compile(action: "render", file: "webinar-single-post.typ", format: "png", ppi: 72)
 ```
 
 ## Limits

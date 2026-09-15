@@ -7,12 +7,15 @@ use Spora\Core\Paths;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstCompilationException;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
+use Spora\Plugins\Typst\Services\TypstResourcePaths;
+use Spora\Plugins\Typst\Services\TypstResourceStore;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Services\MediaArchive\DerivativeOutput;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerInterface;
 use Spora\Services\MediaArchive\MediaDerivativeService;
+use Spora\Tools\Attributes\ToolParameter;
 
 const COMPILE_TOOL_PDF_MIME = 'application/pdf';
 const COMPILE_TOOL_PNG_MIME = 'image/png';
@@ -98,10 +101,45 @@ beforeEach(function () {
     $resolver = static function () use ($self): ?MediaDerivativeProducerInterface {
         return $self->fakeProducer;
     };
+
+    // `Typst\Inspector` is `final` and Mockery can't mock final
+    // classes — return an anonymous wrapper that exposes the
+    // duck-typed inspectString/errors/warnings surface the tool uses.
+    $this->fakeInspector = null;
+    $inspectorFactory = static function () use ($self): object {
+        if ($self->fakeInspector !== null) {
+            return $self->fakeInspector;
+        }
+        return new class {
+            public function inspectString(string $source): object
+            {
+                return new class {
+                    public function errors(): array
+                    {
+                        return [];
+                    }
+                    public function warnings(): array
+                    {
+                        return [];
+                    }
+                    public function success(): bool
+                    {
+                        return true;
+                    }
+                    public function hasErrors(): bool
+                    {
+                        return false;
+                    }
+                };
+            }
+        };
+    };
+
     $this->tool = new TypstCompileTool(
         $this->worldFactory,
         $this->derivativeService,
         producerResolver: $resolver,
+        inspectorFactory: $inspectorFactory,
     );
 
     $this->context = new Spora\Services\PrincipalContext(
@@ -191,7 +229,8 @@ describe('render path', function (): void {
     it('returns a failed ToolResult when the file points to a missing asset', function () {
         $result = $this->tool->execute(['action' => 'render', 'file' => 'no-such-asset'], agentId: 0, userId: null);
         expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('media asset "no-such-asset" not found');
+        expect($result->content)->toContain('file "no-such-asset" not found');
+        expect($result->content)->toContain('checked media_assets by UUID, then templates/ and examples/');
     });
 
     it('returns a failed ToolResult when the producer is not registered', function () {
@@ -680,7 +719,8 @@ describe('inspect path', function (): void {
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
-        expect($result->content)->toContain('media asset "no-such-asset" not found');
+        expect($result->content)->toContain('file "no-such-asset" not found');
+        expect($result->content)->toContain('checked media_assets by UUID, then templates/ and examples/');
     });
 
     it('produces a describeAction string for an inspect call', function () {
@@ -859,5 +899,127 @@ describe('inspect path', function (): void {
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('inspect failed');
         expect($result->content)->toContain('inspector exploded');
+    });
+});
+
+/**
+ * `typst_compile.file` is polymorphic (UUID or basename under the
+ * principal's `templates/` / `examples/`) so an LLM can render a
+ * file uploaded via `typst_resources.write` without round-tripping
+ * through the media archive.
+ */
+describe('typst_compile.file is polymorphic (UUID OR basename)', function (): void {
+    it('declares source and file as required: false in the tool schema', function (): void {
+        $reflection = new ReflectionClass(TypstCompileTool::class);
+        $byName = [];
+        foreach ($reflection->getAttributes(ToolParameter::class) as $attr) {
+            $instance = $attr->newInstance();
+            $byName[$instance->name] = $instance;
+        }
+
+        expect($byName)->toHaveKey('source');
+        expect($byName)->toHaveKey('file');
+        expect($byName['source']->required)->toBeFalse();
+        expect($byName['file']->required)->toBeFalse();
+    });
+
+    it('reads file bytes from the principal templates/ tree when no MediaAsset matches', function (): void {
+        $basename = 'webinar-single-post.typ';
+        $bytes    = "= Webinar promo\n#set page(width: 1080pt, height: 1080pt)\n";
+
+        // Tool's `paths()` resolves to BASE_PATH — write there too.
+        $resourcePaths = new TypstResourcePaths(new Paths(BASE_PATH), (int) $this->principalId);
+        $store = new TypstResourceStore($resourcePaths);
+        $store->write(TypstResourcePaths::KIND_TEMPLATE, $basename, $bytes);
+
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'file' => $basename, 'format' => 'png'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->content)->toContain('no diagnostics');
+        expect($result->success)->toBeTrue();
+    });
+
+    it('prefers templates/ over examples/ when both have the basename', function (): void {
+        $basename = 'shared.typ';
+        $resourcePaths = new TypstResourcePaths(new Paths(BASE_PATH), (int) $this->principalId);
+        $store = new TypstResourceStore($resourcePaths);
+        $store->write(TypstResourcePaths::KIND_TEMPLATE, $basename, "= from template\n");
+        $store->write(TypstResourcePaths::KIND_EXAMPLE, $basename, "= from example\n");
+
+        $this->fakeProducer = makeFakeProducer();
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'file' => $basename],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+    });
+
+    it('falls back to examples/ when no template has the basename', function (): void {
+        $basename = 'example-only.typ';
+        $resourcePaths = new TypstResourcePaths(new Paths(BASE_PATH), (int) $this->principalId);
+        $store = new TypstResourceStore($resourcePaths);
+        $store->write(TypstResourcePaths::KIND_EXAMPLE, $basename, "= example body\n");
+
+        $this->fakeProducer = makeFakeProducer();
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'file' => $basename],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+    });
+
+    it('returns a clear error when file matches neither media_assets nor templates/ nor examples/', function (): void {
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'file' => 'no-such-file-anywhere.typ'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('checked media_assets by UUID, then templates/ and examples/');
+    });
+
+    it('treats an empty file string as "no source provided" instead of crashing', function (): void {
+        // LLM drivers sometimes coerce an unset optional string to
+        // "" — the schema must accept that without erroring.
+        $result = $this->tool->execute(
+            ['action' => 'inspect', 'source' => "= Hi\n", 'file' => ''],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeTrue();
+    });
+
+    it('renders file=<basename> under templates/ without crashing producePersistOrThrow() (regression)', function (): void {
+        // The render path needs a MediaAsset parent for both the
+        // derivative FK and the playground picker; resolveSourceForRender()
+        // materialises one from the filesystem bytes.
+        $basename = 'teaser.typ';
+        $bytes    = "= Teaser\n#set page(width: 1080pt, height: 1080pt)\n";
+
+        $resourcePaths = new TypstResourcePaths(new Paths(BASE_PATH), (int) $this->principalId);
+        $store = new TypstResourceStore($resourcePaths);
+        $store->write(TypstResourcePaths::KIND_TEMPLATE, $basename, $bytes);
+
+        $this->fakeProducer = makeFakeProducer();
+        $result = $this->tool->execute(
+            ['action' => 'render', 'file' => $basename, 'format' => 'pdf'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['format'])->toBe('pdf');
+        expect($result->data['mime'])->toBe('application/pdf');
     });
 });
