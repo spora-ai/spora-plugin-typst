@@ -626,6 +626,13 @@ describe('render path', function (): void {
         expect($preview)->not->toBeNull();
         expect($preview->plugin_slug)->toBe('spora-plugin-typst');
         expect($preview->tool_name)->toBe('typst.render');
+        // Regression: the preview row's user_id + principal_id must
+        // match the source's so MediaTool::assetInScope() accepts it
+        // on a follow-up get_media(preview_id). Previously the data
+        // channel's preview render was called without $userId/$context,
+        // which left this row's user_id NULL and broke the scope check.
+        expect($preview->user_id)->toBe($this->userId);
+        expect($preview->principal_id)->toBe((int) $this->context->principalId);
 
         // preview_url is the canonical media-archive URL.
         expect($result->data)->toHaveKey('preview_url');

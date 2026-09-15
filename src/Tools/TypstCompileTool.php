@@ -367,9 +367,24 @@ final class TypstCompileTool extends AbstractTypstTool
         $url = $derivative->asset_url;
         $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
 
-        $body = $format === 'pdf'
-            ? $this->pdfRenderContent($url, $alt, $parent, $userId, $context)
-            : MediaEmbed::image($url, $alt);
+        // Render the first-page PNG sibling ONCE per render. The result
+        // (or null on failure) drives both the chat-UI markdown body
+        // and the data-channel `preview_id` / `preview_url` fields —
+        // a previous incarnation called firstPagePngDerivative()
+        // twice (once here, once in pdfRenderContent()), which double-
+        // rendered the page AND let the second call persist the row
+        // with userId=null on its own (when the first call returned
+        // null, e.g. producer un-registered), leaving the PNG row
+        // unscoped against MediaTool::assetInScope.
+        $preview = $format === 'pdf'
+            ? $this->firstPagePngDerivative($parent, $userId, $context)
+            : null;
+
+        $body = $preview !== null
+            ? $this->pdfRenderContent($url, $alt, $preview)
+            : ($format === 'pdf'
+                ? sprintf('[Open PDF](%s)', $url)
+                : MediaEmbed::image($url, $alt));
 
         $content = sprintf(
             "Rendered %s\n\n%s\n\n%s",
@@ -388,12 +403,9 @@ final class TypstCompileTool extends AbstractTypstTool
             'width'         => $derivative->width,
             'height'        => $derivative->height,
         ];
-        if ($format === 'pdf') {
-            $preview = $this->firstPagePngDerivative($parent);
-            if ($preview !== null) {
-                $data['preview_id']  = $preview->id;
-                $data['preview_url'] = $preview->asset_url;
-            }
+        if ($preview !== null) {
+            $data['preview_id']  = $preview->id;
+            $data['preview_url'] = $preview->asset_url;
         }
 
         return ToolResult::ok(
@@ -405,18 +417,12 @@ final class TypstCompileTool extends AbstractTypstTool
     /**
      * PDFs aren't image-embedable in the chat sanitizer; pair the
      * link with a first-page PNG preview so the chat UI sees the
-     * result inline. The preview PNG's URL is sourced from the
-     * sibling derivative row materialised by
-     * {@see firstPagePngDerivative()} (also returned in the data
-     * channel as `preview_id`); when the preview render or its
-     * persistence fails the PDF body falls back to a single link.
+     * result inline. The preview is supplied by the caller (rendered
+     * once in {@see buildSuccessToolResult()} and reused here) so
+     * the chat-UI body and the data channel share one `MediaAsset`.
      */
-    private function pdfRenderContent(string $url, string $alt, MediaAsset $parent, ?int $userId = null, ?PrincipalContext $context = null): string
+    private function pdfRenderContent(string $url, string $alt, MediaAsset $preview): string
     {
-        $preview = $this->firstPagePngDerivative($parent, $userId, $context);
-        if ($preview === null) {
-            return sprintf('[Open PDF](%s)', $url);
-        }
         return sprintf(
             "[Open PDF](%s)\n\n%s",
             $url,
