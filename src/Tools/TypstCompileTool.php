@@ -249,7 +249,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 $userId,
                 $context,
             );
-            return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format);
+            return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format, $userId, $context);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
@@ -344,18 +344,47 @@ final class TypstCompileTool extends AbstractTypstTool
      * list, and the OpenAI plugin already standardised on a plural
      * list (`image_urls`). The HTTP controller payload keeps
      * `asset_url` because the typst-frontend binds to it.
+     *
+     * `source_id` and `preview_id` are the data-channel IDs that
+     * close the round-trip with `media.get_source` /
+     * `media.list_derivatives`: `source_id` is the parent row
+     * (`text/x-typst`, the .typ source bytes — `media.get_source`
+     * returns them), and `preview_id` is the first-page PNG sibling
+     * row for PDF renders (none for png/svg renders — the rendered
+     * output IS the preview). Without these IDs the LLM can only see
+     * the derivative's UUID, which is the *rendered* bytes; probing
+     * it via `media.get_source` returns the PDF, never the .typ.
+     * Mirrors the HTTP controller's `source_id` field (see
+     * {@see \Spora\Plugins\Typst\Http\TypstCompileController::buildCompilePayload()}).
      */
     private function buildSuccessToolResult(
         MediaAsset $derivative,
         MediaAsset $parent,
         string $format,
+        ?int $userId = null,
+        ?PrincipalContext $context = null,
     ): ToolResult {
         $url = $derivative->asset_url;
         $alt = sprintf('Typst %s render of %s', strtoupper($format), $parent->filename ?? $parent->id);
 
-        $body = $format === 'pdf'
-            ? $this->pdfRenderContent($url, $alt, $parent)
-            : MediaEmbed::image($url, $alt);
+        // Render the first-page PNG sibling ONCE per render. The result
+        // (or null on failure) drives both the chat-UI markdown body
+        // and the data-channel `preview_id` / `preview_url` fields —
+        // a previous incarnation called firstPagePngDerivative()
+        // twice (once here, once in pdfRenderContent()), which double-
+        // rendered the page AND let the second call persist the row
+        // with userId=null on its own (when the first call returned
+        // null, e.g. producer un-registered), leaving the PNG row
+        // unscoped against MediaTool::assetInScope.
+        $preview = $format === 'pdf'
+            ? $this->firstPagePngDerivative($parent, $userId, $context)
+            : null;
+
+        $body = match (true) {
+            $preview !== null => $this->pdfRenderContent($url, $alt, $preview),
+            $format === 'pdf' => sprintf('[Open PDF](%s)', $url),
+            default           => MediaEmbed::image($url, $alt),
+        };
 
         $content = sprintf(
             "Rendered %s\n\n%s\n\n%s",
@@ -364,36 +393,40 @@ final class TypstCompileTool extends AbstractTypstTool
             $this->echoInstruction(),
         );
 
+        $data = [
+            'derivative_id' => $derivative->id,
+            'source_id'     => $parent->id,
+            'asset_urls'    => [$url],
+            'format'        => $format,
+            'mime'          => $derivative->mime_type,
+            'size'          => $derivative->byte_size,
+            'width'         => $derivative->width,
+            'height'        => $derivative->height,
+        ];
+        if ($preview !== null) {
+            $data['preview_id']  = $preview->id;
+            $data['preview_url'] = $preview->asset_url;
+        }
+
         return ToolResult::ok(
             content: $content,
-            data: [
-                'derivative_id' => $derivative->id,
-                'asset_urls'    => [$url],
-                'format'        => $format,
-                'mime'          => $derivative->mime_type,
-                'size'          => $derivative->byte_size,
-                'width'         => $derivative->width,
-                'height'        => $derivative->height,
-            ],
+            data: $data,
         );
     }
 
     /**
      * PDFs aren't image-embedable in the chat sanitizer; pair the
-     * link with a first-page PNG preview so the user sees the result
-     * inline. The PNG is produced via the same producer path and
-     * persisted as a sibling derivative.
+     * link with a first-page PNG preview so the chat UI sees the
+     * result inline. The preview is supplied by the caller (rendered
+     * once in {@see buildSuccessToolResult()} and reused here) so
+     * the chat-UI body and the data channel share one `MediaAsset`.
      */
-    private function pdfRenderContent(string $url, string $alt, MediaAsset $parent): string
+    private function pdfRenderContent(string $url, string $alt, MediaAsset $preview): string
     {
-        $previewUrl = $this->firstPagePngUrl($parent);
-        if ($previewUrl === '') {
-            return sprintf('[Open PDF](%s)', $url);
-        }
         return sprintf(
             "[Open PDF](%s)\n\n%s",
             $url,
-            MediaEmbed::image($previewUrl, $alt . ' (first-page preview)'),
+            MediaEmbed::image($preview->asset_url, $alt . ' (first-page preview)'),
         );
     }
 
@@ -406,41 +439,53 @@ final class TypstCompileTool extends AbstractTypstTool
      * preventative half: LLMs that try to embed the result in a
      * follow-up call otherwise hallucinate `file:///tmp/...` or
      * `https://example.com/...` URLs that don't resolve.
+     *
+     * Also points at the data-channel IDs that close the round-trip
+     * with the media tool: `source_id` is the parent .typ row (call
+     * `media.get_source(source_id)` to read it back), `preview_id`
+     * is the first-page PNG sibling for PDF renders.
      */
     private function echoInstruction(): string
     {
         return 'Echo the markdown block above verbatim so the chat UI renders the result inline. '
             . 'For raw URLs (e.g. to embed in a follow-up tool call), read ToolResult.data.asset_urls. '
             . 'Do NOT invent or rewrite URLs — `file://` and external domains are unsupported; '
-            . 'the data channel is the only authoritative source.';
+            . 'the data channel is the only authoritative source. '
+            . 'ToolResult.data.source_id is the parent .typ row — call media.get_source(source_id) to '
+            . 'read it back for the iterate loop; ToolResult.data.preview_id (PDF renders only) is the '
+            . 'first-page PNG sibling.';
     }
 
     /**
      * Render a first-page PNG sibling so the chat UI's `MediaEmbed`
-     * shows a preview. Returns the preview asset URL or empty string
-     * when the producer or persistence path fails — the parent
-     * render still succeeds; the preview is best-effort.
+     * shows a preview. Returns the preview `MediaAsset` or null when
+     * the producer or persistence path fails — the parent render
+     * still succeeds; the preview is best-effort. The PNG is
+     * persisted with the render call's `userId`/`context` so the
+     * resulting row is in the same principal + user scope as the
+     * source (passing `null/null` here would leave the row's
+     * `user_id` empty and `media.get_media(preview_id)` would
+     * reject it under the agent's owner-scope check).
      */
-    private function firstPagePngUrl(MediaAsset $parent): string
+    private function firstPagePngDerivative(MediaAsset $parent, ?int $userId = null, ?PrincipalContext $context = null): ?MediaAsset
     {
         $producer = $this->findProducer();
         if ($producer === null) {
-            return '';
+            return null;
         }
         try {
             $png = $producer->produce($parent, 'png', ['page' => 0, 'ppi' => TypstRenderProducer::DEFAULT_PPI]);
-            $pngDerivative = $this->derivativeService->create(
+            return $this->derivativeService->create(
                 parent: $parent,
                 output: $png,
                 format: 'png',
                 producerPlugin: $producer->pluginSlug(),
                 producerOperation: $producer->operationName(),
-                userId: null,
-                context: null,
+                userId: $userId,
+                context: $context,
             );
-            return $pngDerivative->asset_url;
         } catch (Throwable) {
-            return '';
+            return null;
         }
     }
 

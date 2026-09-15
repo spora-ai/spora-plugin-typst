@@ -4,7 +4,7 @@ description: "When the user asks for a typeset document, a PDF report, a slide d
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.4"
+  version: "1.5"
   allowedByDefault: false
   requiresTools: "typst_compile,typst_resources"
 ---
@@ -123,16 +123,31 @@ Successful renders return:
 ```json
 {
   "derivative_id": "01HXYZ...",
-  "asset_urls": ["/api/v1/assets/01HXYZ....pdf"],
-  "format": "pdf",
-  "mime": "application/pdf",
-  "size": 6532,
-  "width": null,
-  "height": null
+  "source_id":     "01HABC...",
+  "asset_urls":    ["/api/v1/assets/01HXYZ....pdf"],
+  "format":        "pdf",
+  "mime":          "application/pdf",
+  "size":          6532,
+  "width":         null,
+  "height":        null
 }
 ```
 
-For PDF the markdown content additionally includes the first-page PNG preview URL inline as a markdown image, but only the primary deliverable URL appears in `asset_urls`. `width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The URLs in `asset_urls` are stable across re-renders — calling `typst_compile(action: "render")` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
+For PDF renders the data channel also includes `preview_id` and `preview_url` for the first-page PNG sibling — both omitted for png/svg renders (the rendered output IS the preview).
+
+The fields mean:
+
+| Field | What it is |
+| --- | --- |
+| `derivative_id` | The rendered output row (PDF / PNG / SVG bytes). |
+| `source_id`     | The parent `.typ` row (`text/x-typst`, mime). `media.get_source(source_id)` returns the bytes that were just compiled — use this for `read → modify → write` against your own previous render. |
+| `preview_id`    | First-page PNG sibling row (PDF renders only). `media.list_derivatives(source_id)` returns this same row plus the PDF. |
+| `asset_urls`    | Canonical URLs for the rendered bytes (the `[Open PDF](url)` / `![…](url)` link targets). |
+| `mime` / `size` / `width` / `height` | Self-describing metadata for the rendered bytes. |
+
+`derivative_id` is the *rendered* bytes — `media.get_source(derivative_id)` returns the PDF, never the `.typ`. The `.typ` lives at `source_id`. The two rows are linked by the `media_derivatives` join table.
+
+`width`/`height` are populated only for `png` (PNG image dimensions). `size` is the derivative's byte count. The URLs in `asset_urls` are stable across re-renders — calling `typst_compile(action: "render")` again with the same `(file, format)` tuple updates the existing row's bytes but keeps the same id, so URLs the operator has bookmarked stay valid.
 
 ## Typst syntax primer (the minimum you need)
 
