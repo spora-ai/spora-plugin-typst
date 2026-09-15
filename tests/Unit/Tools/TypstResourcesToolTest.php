@@ -382,4 +382,55 @@ describe('op: read (list → read → modify → write → render iteration loop
         expect($principalARead->success)->toBeTrue();
         expect($principalARead->content)->toContain('PRIVATE');
     });
+
+    it('rejects read with an invalid basename charset (store-side validation)', function (): void {
+        // `TypstResourceStore::read()` validates the basename via the
+        // same conservative charset as `write`. A basename containing
+        // `/` must throw, which the tool translates into a
+        // `typst_resources: ...` prefixed error message.
+        $result = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'evil/../escape'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('invalid basename');
+    });
+});
+
+describe('op: read (images)', function (): void {
+    it('rejects image read when `name` is missing', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('`name` is required');
+    });
+
+    it('returns a not-found error when the image basename is missing', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read', 'name' => 'ghost.png'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('not found');
+        expect($read->content)->toContain('ghost.png');
+    });
+
+    it('rejects image read with an invalid basename charset', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read', 'name' => 'evil/../escape'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('invalid basename');
+    });
 });
