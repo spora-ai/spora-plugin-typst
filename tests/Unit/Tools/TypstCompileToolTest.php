@@ -998,4 +998,32 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         );
         expect($result->success)->toBeTrue();
     });
+
+    it('renders file=<basename> under templates/ without crashing producePersistOrThrow() (regression)', function (): void {
+        // Repro: Tom's render path. With the previous fix, inspect
+        // with file=<basename> worked but render crashed at
+        // producePersistOrThrow() because the filesystem fallback
+        // returned parent: null. The render path needs a
+        // MediaAsset parent for both the derivative FK and the
+        // playground picker, so resolveSourceForRender() now
+        // materialises one from the filesystem bytes.
+        $basename = 'teaser.typ';
+        $bytes    = "= Teaser\n#set page(width: 1080pt, height: 1080pt)\n";
+
+        $resourcePaths = new TypstResourcePaths(new Paths(BASE_PATH), (int) $this->principalId);
+        $store = new TypstResourceStore($resourcePaths);
+        $store->write(TypstResourcePaths::KIND_TEMPLATE, $basename, $bytes);
+
+        $this->fakeProducer = makeFakeProducer();
+        $result = $this->tool->execute(
+            ['action' => 'render', 'file' => $basename, 'format' => 'pdf'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['format'])->toBe('pdf');
+        expect($result->data['mime'])->toBe('application/pdf');
+    });
 });
