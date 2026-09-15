@@ -149,30 +149,22 @@ final class TypstResourcesTool extends AbstractTypstTool
 
     private function dispatchResource(TypstResourcePaths $paths, string $kind, string $op, array $arguments): ToolResult
     {
-        if ($op === 'list') {
-            return $this->listResources($paths, $kind);
-        }
-        if ($op === 'write') {
-            return $this->writeResource($paths, $kind, $arguments);
-        }
-        if ($op === 'read') {
-            return $this->readResource($paths, $kind, $arguments);
-        }
-        return $this->deleteResource($paths, $kind, $arguments);
+        return match ($op) {
+            'list'  => $this->listResources($paths, $kind),
+            'write' => $this->writeResource($paths, $kind, $arguments),
+            'read'  => $this->readResource($paths, $kind, $arguments),
+            default => $this->deleteResource($paths, $kind, $arguments),
+        };
     }
 
     private function dispatchImage(TypstResourcePaths $paths, string $op, array $arguments): ToolResult
     {
-        if ($op === 'list') {
-            return $this->listImages($paths);
-        }
-        if ($op === 'write') {
-            return $this->writeImage($paths, $arguments);
-        }
-        if ($op === 'read') {
-            return $this->readImage($paths, $arguments);
-        }
-        return $this->deleteImage($paths, $arguments);
+        return match ($op) {
+            'list'  => $this->listImages($paths),
+            'write' => $this->writeImage($paths, $arguments),
+            'read'  => $this->readImage($paths, $arguments),
+            default => $this->deleteImage($paths, $arguments),
+        };
     }
 
     private function listResources(TypstResourcePaths $paths, string $kind): ToolResult
@@ -247,14 +239,13 @@ final class TypstResourcesTool extends AbstractTypstTool
         } catch (Throwable $e) {
             return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
-        if ($bytes === null) {
-            return new ToolResult(false, sprintf(
+        return $bytes === null
+            ? new ToolResult(false, sprintf(
                 'typst_resources: %s/%s not found (searched tier-2 then tier-1 under the calling principal)',
                 $kind,
                 $name,
-            ));
-        }
-        return $this->formatReadResult($kind, $name, $bytes);
+            ))
+            : $this->formatReadResult($kind, $name, $bytes);
     }
 
     private function deleteResource(TypstResourcePaths $paths, string $kind, array $arguments): ToolResult
@@ -331,13 +322,12 @@ final class TypstResourcesTool extends AbstractTypstTool
         } catch (Throwable $e) {
             return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
-        if ($bytes === null) {
-            return new ToolResult(false, sprintf(
+        return $bytes === null
+            ? new ToolResult(false, sprintf(
                 'typst_resources: image/%s not found under the calling principal',
                 $name,
-            ));
-        }
-        return $this->formatReadResult('image', $name, $bytes);
+            ))
+            : $this->formatReadResult('image', $name, $bytes);
     }
 
     /**
