@@ -380,11 +380,11 @@ final class TypstCompileTool extends AbstractTypstTool
             ? $this->firstPagePngDerivative($parent, $userId, $context)
             : null;
 
-        $body = $preview !== null
-            ? $this->pdfRenderContent($url, $alt, $preview)
-            : ($format === 'pdf'
-                ? sprintf('[Open PDF](%s)', $url)
-                : MediaEmbed::image($url, $alt));
+        $body = match (true) {
+            $preview !== null => $this->pdfRenderContent($url, $alt, $preview),
+            $format === 'pdf' => sprintf('[Open PDF](%s)', $url),
+            default           => MediaEmbed::image($url, $alt),
+        };
 
         $content = sprintf(
             "Rendered %s\n\n%s\n\n%s",
