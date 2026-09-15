@@ -94,7 +94,7 @@ it('pins the per-operation approval semantics on typst_compile and typst_resourc
     expect($opsByClass)->toHaveKey('Spora\\Plugins\\Typst\\Tools\\TypstResourcesTool');
 
     expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstCompileTool']['render']['auto_approve'] ?? null)
-        ->toBeFalse('render must require approval');
+        ->toBeTrue('render must be auto-approved since v1.1.0');
     expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstCompileTool']['inspect']['auto_approve'] ?? null)
         ->toBeTrue('inspect must be auto-approved');
 
@@ -107,4 +107,17 @@ it('pins the per-operation approval semantics on typst_compile and typst_resourc
 it('requires spora-ai/spora-plugin-typst on the typst-expert agent', function (): void {
     $expert = loadAgentTemplate('typst-expert.json');
     expect($expert['required_plugins'] ?? [])->toContain('spora-ai/spora-plugin-typst');
+});
+
+it('documents the list → read → write iteration loop in the system prompt', function (): void {
+    // Since v1.1.0 the agent teaches itself the iteration workflow so
+    // it doesn't try to `write` a `.typ` from memory. Pin the section
+    // header + key bullet so future rewrites don't silently drop it.
+    $expert = loadAgentTemplate('typst-expert.json');
+    $prompt = (string) ($expert['agent']['system_prompt'] ?? '');
+
+    expect($prompt)->toContain('## 4. Iterate with list → read → write');
+    expect($prompt)->toContain('typst_resources(action: "templates", op: "read"');
+    expect($prompt)->toContain("Don't write a `.typ` you haven't `read` first");
+    expect($prompt)->toContain('auto-approved since v1.1.0');
 });

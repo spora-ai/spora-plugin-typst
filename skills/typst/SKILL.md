@@ -4,7 +4,7 @@ description: "When the user asks for a typeset document, a PDF report, a slide d
 license: Apache-2.0
 metadata:
   author: spora-ai
-  version: "1.3"
+  version: "1.4"
   allowedByDefault: false
   requiresTools: "typst_compile,typst_resources"
 ---
@@ -36,7 +36,7 @@ Two tools, three jobs:
 | --- | --- | --- | --- |
 | `typst_compile` | `action: "inspect"` | Run the inspector on a source; return structured errors and warnings only | First pass on a new source. Cheap; no media-derivative row is created. |
 | `typst_compile` | `action: "render"` | Compile the source to PDF/PNG/SVG and persist it as a media-derivative | When the inspector returns clean, or when the operator has approved a known-imperfect render. |
-| `typst_resources` | `action: "fonts" / "templates" / "examples" / "images"`, `op: "list" / "write" / "delete"` | Manage per-principal resources | When the user wants to upload a brand font, save a reusable template, or store an image asset. |
+| `typst_resources` | `action: "fonts" / "templates" / "examples" / "images"`, `op: "list" / "write" / "delete" / "read"` | Manage per-principal resources | When the user wants to upload a brand font, save a reusable template, or store an image asset. `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`). |
 
 For routine compiles, the flow is `typst_compile(action: "inspect")` → fix → `typst_compile(action: "render")`. Skip the inspect step when the user has already iterated and the source is small enough to inspect inline.
 
@@ -335,9 +335,32 @@ typst_compile(action: "render", file: "01HXYZ_TYPSOURCE_UUID", format: "svg", pa
 typst_compile(action: "render", file: "webinar-single-post.typ", format: "png", ppi: 72)
 ```
 
+### Iterate on a template or example
+
+For "tweak this template" or "update the example", the canonical loop is `list → read → modify → write → render`. **Always `read` before `write`.** The on-disk version is what `typst_compile` renders; writing from memory drops every change the operator made in the admin panel between turns.
+
+```jsonc
+// pass 1 — find the basename
+typst_resources(action: "templates", op: "list")
+
+// pass 2 — fetch the bytes into your context. text kinds (templates,
+// examples) inline the bytes; binary kinds (fonts, images) return
+// base64 in data.content_base64. Tier-2 wins on collision.
+typst_resources(action: "templates", op: "read", name: "invoice.typ")
+
+// pass 3 — modify the bytes in your reasoning, then persist
+typst_resources(action: "templates", op: "write",
+                name: "invoice.typ", content: "<new bytes>")
+
+// pass 4 — re-render to confirm
+typst_compile(action: "render", file: "invoice.typ", format: "png", ppi: 72)
+```
+
+Tier-1 (skill-shipped) rows are readable too. `read` on a row whose only copy is the bundled baseline returns the tier-1 bytes — use that to clone the baseline into a tier-2 upload before modifying it.
+
 ## Limits
 
-- 5 MB max upload per `typst_resources(action="resources_write")` call.
+- 5 MB max per resource (write AND read cap; the same bytes either direction).
 - Basenames restricted to `A-Z a-z 0-9 . _ -`; `/`, `\`, `..` rejected.
 - Tier-2 resources (fonts, templates, examples, images) are
   principal-scoped — you only see yours; you only delete yours.

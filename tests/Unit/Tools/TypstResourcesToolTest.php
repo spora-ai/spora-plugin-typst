@@ -66,7 +66,7 @@ describe('kind discriminator', function (): void {
         );
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('unknown op "wipe"');
-        expect($result->content)->toContain('list, write, delete');
+        expect($result->content)->toContain('list, write, delete, read');
     });
 });
 
@@ -244,5 +244,193 @@ describe('principal scope propagation', function (): void {
             userId: $this->userId,
             context: null,
         ))->toThrow(TypstRuntimeException::class);
+    });
+});
+
+describe('op: read (list → read → modify → write → render iteration loop)', function (): void {
+    it('reads back a previously-written template as inline UTF-8 bytes', function (): void {
+        $payload = "= Hello\n#set page(width: 1080pt, height: 1080pt)\nThis is the source.\n";
+        $this->tool->execute(
+            ['action' => 'templates', 'op' => 'write', 'name' => 'teaser.typ', 'content' => $payload],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        $result = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'teaser.typ'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->content)->toContain('Source of templates/teaser.typ');
+        expect($result->content)->toContain($payload);
+        expect($result->data['encoding'])->toBe('utf-8');
+        expect($result->data['byte_size'])->toBe(strlen($payload));
+        expect($result->data['name'])->toBe('teaser.typ');
+        expect($result->data['kind'])->toBe('templates');
+        expect($result->data)->not->toHaveKey('content_base64');
+    });
+
+    it('returns examples as inline UTF-8 too (text-shaped resource)', function (): void {
+        $payload = "// Example\n= Hello\n";
+        $this->tool->execute(
+            ['action' => 'examples', 'op' => 'write', 'name' => 'hello.typ', 'content' => $payload],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        $result = $this->tool->execute(
+            ['action' => 'examples', 'op' => 'read', 'name' => 'hello.typ'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['encoding'])->toBe('utf-8');
+        expect($result->content)->toContain($payload);
+    });
+
+    it('returns fonts as base64 under data.content_base64', function (): void {
+        // 4 bytes isn't a valid font but proves the binary branch —
+        // the tool doesn't MIME-sniff, it only branches on kind.
+        $bytes = "OTF\x00";
+        $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'write', 'name' => 'Acme.otf', 'content' => $bytes],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        $result = $this->tool->execute(
+            ['action' => 'fonts', 'op' => 'read', 'name' => 'Acme.otf'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['encoding'])->toBe('base64');
+        expect($result->data['byte_size'])->toBe(strlen($bytes));
+        expect(base64_decode((string) $result->data['content_base64'], true))->toBe($bytes);
+    });
+
+    it('returns a not-found error when the basename is missing from both tiers', function (): void {
+        $result = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'ghost.typ'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('not found');
+        expect($result->content)->toContain('ghost.typ');
+        expect($result->content)->toContain('tier-2 then tier-1');
+    });
+
+    it('rejects read when `name` is missing', function (): void {
+        $result = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('`name` is required');
+    });
+
+    it('honours the principal scope — Principal B cannot read Principal A templates', function (): void {
+        // Principal A uploads a private template; Principal B's
+        // `read` must return "not found", never the bytes. Mirrors
+        // the existing principal-scope propagation test.
+        $userIdB = $this->auth->register('principal-b-read-' . bin2hex(random_bytes(4)) . '@example.com', 'Password1!', 'Principal B Read');
+        $principalIdB = $this->principalService->ensureUserPrincipal($userIdB)->id;
+        $contextB = new Spora\Services\PrincipalContext(
+            principalId: $principalIdB,
+            type: 'user',
+            ownerUserId: $userIdB,
+            runnerUserId: $userIdB,
+        );
+
+        $this->tool->execute(
+            ['action' => 'templates', 'op' => 'write', 'name' => 'private-A.typ', 'content' => 'PRIVATE'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        $principalBRead = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'private-A.typ'],
+            agentId: 0,
+            userId: $userIdB,
+            context: $contextB,
+        );
+        expect($principalBRead->success)->toBeFalse();
+        expect($principalBRead->content)->toContain('not found');
+
+        $principalARead = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'private-A.typ'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($principalARead->success)->toBeTrue();
+        expect($principalARead->content)->toContain('PRIVATE');
+    });
+
+    it('rejects read with an invalid basename charset (store-side validation)', function (): void {
+        // `TypstResourceStore::read()` validates the basename via the
+        // same conservative charset as `write`. A basename containing
+        // `/` must throw, which the tool translates into a
+        // `typst_resources: ...` prefixed error message.
+        $result = $this->tool->execute(
+            ['action' => 'templates', 'op' => 'read', 'name' => 'evil/../escape'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('invalid basename');
+    });
+});
+
+describe('op: read (images)', function (): void {
+    it('rejects image read when `name` is missing', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('`name` is required');
+    });
+
+    it('returns a not-found error when the image basename is missing', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read', 'name' => 'ghost.png'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('not found');
+        expect($read->content)->toContain('ghost.png');
+    });
+
+    it('rejects image read with an invalid basename charset', function (): void {
+        $read = $this->tool->execute(
+            ['action' => 'images', 'op' => 'read', 'name' => 'evil/../escape'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($read->success)->toBeFalse();
+        expect($read->content)->toContain('invalid basename');
     });
 });

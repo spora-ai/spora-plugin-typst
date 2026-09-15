@@ -21,15 +21,24 @@ use Throwable;
  * kind is a separate `#[ToolOperation]`, so the LLM-facing schema
  * lists one row per kind instead of a single row with a kind verb.
  *
- * Per-op sub-action `op: list | write | delete` selects the verb.
+ * Per-op sub-action `op: list | write | delete | read` selects the verb.
  * For `list`, no extra params are needed. For `write`, `name` and
  * `content` are required (text bytes — for binary uploads use the
- * admin panel's typst/images endpoint instead). For `delete`, only
- * `name` is required.
+ * admin panel's typst/images endpoint instead). For `delete` and
+ * `read`, only `name` is required.
+ *
+ * `read` returns the resource's bytes so the LLM can iterate:
+ * `list → read → modify → write → render` is the canonical edit
+ * loop on a `.typ` template or example. Text kinds (`templates`,
+ * `examples`) inline the bytes; binary kinds (`fonts`, `images`)
+ * return base64 under `data.content_base64`. Tier-1 (skill-shipped)
+ * rows are readable too — `TypstResourceStore::read()` falls back
+ * from tier-2 to tier-1 — so the LLM can fetch the bundled baseline
+ * before overwriting it.
  *
  * The plugin-shipped tier-1 resources (Inter OFL fonts, the report
- * template, the showcase example) are visible to `list` but cannot
- * be `delete`d — deletion is rejected for tier-1 rows by
+ * template, the showcase example) are visible to `list` and `read`
+ * but cannot be `delete`d — deletion is rejected for tier-1 rows by
  * {@see TypstResourceStore::delete()} and {@see TypstImageStore::delete()}.
  *
  * Basenames are restricted to a conservative charset (the tool
@@ -101,9 +110,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         $action = $this->resolveAction($arguments);
         $op     = strtolower(trim((string) ($arguments['op'] ?? 'list')));
 
-        if (!in_array($op, ['list', 'write', 'delete'], true)) {
+        if (!in_array($op, ['list', 'write', 'delete', 'read'], true)) {
             return new ToolResult(false, sprintf(
-                'typst_resources: unknown op "%s" (expected: list, write, delete)',
+                'typst_resources: unknown op "%s" (expected: list, write, delete, read)',
                 $op,
             ));
         }
@@ -140,24 +149,22 @@ final class TypstResourcesTool extends AbstractTypstTool
 
     private function dispatchResource(TypstResourcePaths $paths, string $kind, string $op, array $arguments): ToolResult
     {
-        if ($op === 'list') {
-            return $this->listResources($paths, $kind);
-        }
-        if ($op === 'write') {
-            return $this->writeResource($paths, $kind, $arguments);
-        }
-        return $this->deleteResource($paths, $kind, $arguments);
+        return match ($op) {
+            'list'  => $this->listResources($paths, $kind),
+            'write' => $this->writeResource($paths, $kind, $arguments),
+            'read'  => $this->readResource($paths, $kind, $arguments),
+            default => $this->deleteResource($paths, $kind, $arguments),
+        };
     }
 
     private function dispatchImage(TypstResourcePaths $paths, string $op, array $arguments): ToolResult
     {
-        if ($op === 'list') {
-            return $this->listImages($paths);
-        }
-        if ($op === 'write') {
-            return $this->writeImage($paths, $arguments);
-        }
-        return $this->deleteImage($paths, $arguments);
+        return match ($op) {
+            'list'  => $this->listImages($paths),
+            'write' => $this->writeImage($paths, $arguments),
+            'read'  => $this->readImage($paths, $arguments),
+            default => $this->deleteImage($paths, $arguments),
+        };
     }
 
     private function listResources(TypstResourcePaths $paths, string $kind): ToolResult
@@ -204,6 +211,41 @@ final class TypstResourcesTool extends AbstractTypstTool
             content: sprintf('typst_resources: wrote %d bytes to %s', strlen($content), $path),
             data: ['path' => $path, 'name' => $name, 'kind' => $kind, 'size' => strlen($content)],
         );
+    }
+
+    /**
+     * Read the resource bytes for the LLM to iterate on (`list →
+     * read → modify → write → render`). Tier-1 + tier-2 are visible
+     * together — {@see TypstResourceStore::read()} prefers tier-2
+     * and falls back to tier-1 — so the LLM can fetch the bundled
+     * baseline before overwriting it.
+     *
+     * Text kinds (`templates`, `examples`) inline the bytes;
+     * `fonts` returns base64 since the binary would corrupt the
+     * tool-result transport. Reads are bounded by the same
+     * {@see TypstResourceStore::MAX_BYTES} cap that `write`
+     * enforces — no asset in tier-2 can exceed 5 MiB, so any
+     * successful read fits inline.
+     */
+    private function readResource(TypstResourcePaths $paths, string $kind, array $arguments): ToolResult
+    {
+        $name = (string) ($arguments['name'] ?? '');
+        if ($name === '') {
+            return new ToolResult(false, 'typst_resources: `name` is required for op=read');
+        }
+        try {
+            TypstResourcePaths::assertValidKind($kind);
+            $bytes = (new TypstResourceStore($paths))->read($kind, $name);
+        } catch (Throwable $e) {
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
+        }
+        return $bytes === null
+            ? new ToolResult(false, sprintf(
+                'typst_resources: %s/%s not found (searched tier-2 then tier-1 under the calling principal)',
+                $kind,
+                $name,
+            ))
+            : $this->formatReadResult($kind, $name, $bytes);
     }
 
     private function deleteResource(TypstResourcePaths $paths, string $kind, array $arguments): ToolResult
@@ -260,6 +302,88 @@ final class TypstResourcesTool extends AbstractTypstTool
         return ToolResult::ok(
             content: sprintf('typst_resources: wrote %d bytes to %s', strlen($content), $row['name']),
             data: ['name' => $row['name'], 'size' => $row['size']],
+        );
+    }
+
+    /**
+     * Image read mirrors {@see readResource()} but uses
+     * {@see TypstImageStore::read()} (binary-only) and always returns
+     * base64. Images are principal-only — there is no tier-1 image
+     * fallback by design.
+     */
+    private function readImage(TypstResourcePaths $paths, array $arguments): ToolResult
+    {
+        $name = (string) ($arguments['name'] ?? '');
+        if ($name === '') {
+            return new ToolResult(false, 'typst_resources: `name` is required for op=read');
+        }
+        try {
+            $bytes = (new TypstImageStore($paths))->read($name);
+        } catch (Throwable $e) {
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
+        }
+        return $bytes === null
+            ? new ToolResult(false, sprintf(
+                'typst_resources: image/%s not found under the calling principal',
+                $name,
+            ))
+            : $this->formatReadResult('image', $name, $bytes);
+    }
+
+    /**
+     * Format a read result for the LLM. Text kinds inline the bytes
+     * after a small header so the LLM can recognise the source vs
+     * its own reasoning; binary kinds return the bytes base64 in
+     * `data.content_base64` so a non-text payload can't corrupt the
+     * tool-result transport.
+     *
+     * `$kind` is the singular resource kind (`font`, `template`,
+     * `example`, `image`) — the same shape {@see TypstResourceStore::read()}
+     * and {@see TypstImageStore::read()} take. The binary branch
+     * matches `font` and `image`; templates and examples are text.
+     */
+    private function formatReadResult(string $kind, string $name, string $bytes): ToolResult
+    {
+        $size  = strlen($bytes);
+        $isBin = $kind === 'font' || $kind === 'image';
+        $kindPlural = match ($kind) {
+            'font'     => 'fonts',
+            'template' => 'templates',
+            'example'  => 'examples',
+            'image'    => 'images',
+            default    => throw new \Spora\Plugins\Typst\Exceptions\TypstRuntimeException(sprintf(
+                'typst_resources: formatReadResult called with unknown kind "%s"',
+                $kind,
+            )),
+        };
+
+        if ($isBin) {
+            return ToolResult::ok(
+                sprintf(
+                    'Binary %s/%s (%d bytes); base64 payload in data.content_base64.',
+                    $kindPlural,
+                    $name,
+                    $size,
+                ),
+                [
+                    'name'           => $name,
+                    'kind'           => $kindPlural,
+                    'byte_size'      => $size,
+                    'encoding'       => 'base64',
+                    'content_base64' => base64_encode($bytes),
+                ],
+            );
+        }
+
+        $header = sprintf('Source of %s/%s (%d bytes):', $kindPlural, $name, $size);
+        return ToolResult::ok(
+            $header . "\n\n" . $bytes,
+            [
+                'name'      => $name,
+                'kind'      => $kindPlural,
+                'byte_size' => $size,
+                'encoding'  => 'utf-8',
+            ],
         );
     }
 
