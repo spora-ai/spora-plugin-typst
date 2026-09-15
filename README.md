@@ -79,8 +79,8 @@ The plugin's test suite has two parts:
 
 | Tool | Operations | Notes |
 | --- | --- | --- |
-| `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval). `inspect` is a read-only error-only pass (auto-approved). |
-| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete`). Read-only ops are auto-approved; `write` and `delete` require approval. |
+| `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval by default; the `typst-expert` agent template flips it auto-approved). The response's `data.source_id` is the parent `.typ` row (`media.get_source(source_id)` returns the bytes); `data.derivative_id` is the rendered bytes; `data.preview_id` (PDF only) is the first-page PNG sibling. `inspect` is a read-only error-only pass (auto-approved). |
+| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. Read-only ops are auto-approved; `write` and `delete` require approval. |
 
 `typst_compile` accepts the source as either:
 
@@ -189,22 +189,28 @@ The response shape:
 {
   "data": {
     "derivative_id": "01HXYZ...",
+    "source_id":     "01HABC...",
     "asset_url": "/api/v1/assets/01HXYZ....pdf",
     "format": "pdf",
     "mime": "application/pdf",
     "size": 12345,
     "width": null,
     "height": null,
-    "preview_url": "/api/v1/assets/01HABC....png"
+    "preview_url": "/api/v1/assets/01HPREVIEW....png"
   }
 }
 ```
+
+`source_id` is the parent `.typ` row (`text/x-typst`) — `media.get_source(source_id)` returns the bytes that were just compiled. `derivative_id` is the rendered output; probing it via `media.get_source` returns the PDF, never the `.typ`. The two rows are linked by the `media_derivatives` join table. `preview_url` is the first-page PNG sibling for PDF renders (omitted for png/svg).
 
 > The HTTP controller payload above uses `asset_url` (singular). When
 > the LLM-facing `typst_compile` tool surfaces the same result, the
 > `ToolResult.data` envelope carries `asset_urls` (a list, kept
 > plural even when one entry) — the canonical URL channel that
-> downstream tool calls should read. See `skills/typst/SKILL.md` for
+> downstream tool calls should read. The LLM-facing tool also adds
+> `preview_id` alongside `preview_url` so a follow-up call can target
+> the sibling row by id (e.g. for `media.list_derivatives(source_id)`
+> or `media.get_media(preview_id)`). See `skills/typst/SKILL.md` for
 > the LLM-facing shape and the explicit "do not invent URLs"
 > instruction that mirrors the OpenAI image plugin.
 

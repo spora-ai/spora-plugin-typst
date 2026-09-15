@@ -572,6 +572,95 @@ describe('render path', function (): void {
         expect($parent->id)->not->toBeEmpty();
     });
 
+    it('surfaces source_id + preview_id in the data channel on PDF renders', function () {
+        // The LLM-facing data channel must expose the parent .typ row's
+        // UUID (`source_id`) and the first-page PNG sibling's UUID
+        // (`preview_id`) so a follow-up call to media.get_source /
+        // media.list_derivatives has a handle. Without these the LLM
+        // only sees `derivative_id` (the rendered bytes), and probing
+        // it via media.get_source returns the PDF — never the .typ
+        // (regression: previously the source bytes were effectively
+        // lost from the LLM's perspective even though they were
+        // persisted on the parent row).
+        $this->fakeProducer = makeFakeProducer(
+            output: new DerivativeOutput('%PDF-1.4 fake', COMPILE_TOOL_PDF_MIME, width: 612, height: 792),
+        );
+
+        $result = $this->tool->execute(
+            ['action' => 'render', 'source' => "= Hello\n", 'filename' => 'data-channels.typ', 'format' => 'pdf'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        if (!$result->success) {
+            // Same end-to-end-skip behaviour as the other PDF/PNG tests.
+            expect($result->success)->toBeFalse();
+            return;
+        }
+
+        // source_id matches the persisted parent .typ row.
+        expect($result->data)->toHaveKey('source_id');
+        $sourceId = $result->data['source_id'];
+        expect($sourceId)->toBeString()->not->toBeEmpty();
+
+        $parent = MediaAsset::query()->find($sourceId);
+        expect($parent)->not->toBeNull();
+        expect($parent->mime_type)->toBe('text/x-typst');
+        expect($parent->plugin_slug)->toBe('spora-plugin-typst');
+        expect($parent->tool_name)->toBe('typst.playground');
+
+        // derivative_id is a different row (the rendered PDF).
+        $derivativeId = $result->data['derivative_id'];
+        expect($derivativeId)->toBeString()->not->toBeEmpty();
+        expect($derivativeId)->not->toBe($sourceId);
+
+        // preview_id is a third row (the first-page PNG sibling).
+        expect($result->data)->toHaveKey('preview_id');
+        $previewId = $result->data['preview_id'];
+        expect($previewId)->toBeString()->not->toBeEmpty();
+        expect($previewId)->not->toBe($sourceId);
+        expect($previewId)->not->toBe($derivativeId);
+
+        $preview = MediaAsset::query()->find($previewId);
+        expect($preview)->not->toBeNull();
+        expect($preview->plugin_slug)->toBe('spora-plugin-typst');
+        expect($preview->tool_name)->toBe('typst.render');
+
+        // preview_url is the canonical media-archive URL.
+        expect($result->data)->toHaveKey('preview_url');
+        expect($result->data['preview_url'])->toStartWith('/api/v1/assets/');
+
+        // The three rows are linked via media_derivatives (parent_id).
+        $parentDerivatives = $this->derivativeService->listFor($sourceId);
+        $derivativeIds = array_map(static fn($d) => $d['derivative']->id, $parentDerivatives);
+        expect($derivativeIds)->toContain($derivativeId);
+        expect($derivativeIds)->toContain($previewId);
+    });
+
+    it('omits preview_id on PNG renders (the rendered output IS the preview)', function () {
+        $this->fakeProducer = makeFakeProducer(
+            output: new DerivativeOutput("\x89PNG\r\n\x1a\nfake", COMPILE_TOOL_PNG_MIME, width: 100, height: 100),
+        );
+
+        $result = $this->tool->execute(
+            ['action' => 'render', 'source' => '= PNG', 'filename' => 'no-preview.typ', 'format' => 'png'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        if (!$result->success) {
+            expect($result->success)->toBeFalse();
+            return;
+        }
+
+        expect($result->data)->toHaveKey('source_id');
+        expect($result->data['source_id'])->toBeString()->not->toBeEmpty();
+        expect($result->data)->not->toHaveKey('preview_id');
+        expect($result->data)->not->toHaveKey('preview_url');
+    });
+
     it('ignores filename when render is called via file=<id>', function () {
         $parent = new MediaAsset();
         $parent->id = 'parent-' . bin2hex(random_bytes(4));
