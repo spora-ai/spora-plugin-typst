@@ -43,6 +43,14 @@ final class TypstApp implements VueAppInterface
         return 'M13 4v16M17 4v16M19 4H9.5a4.5 4.5 0 0 0 0 9H13';
     }
 
+    public function accent(): string
+    {
+        // `sky` token from plugin.schema.json's `accent` enum — same
+        // colour the navbar drawer used to hardcode before the host
+        // read the value from the plugin. See spora-ai/spora-core#264.
+        return 'sky';
+    }
+
     public function entry(): string
     {
         return 'main.js';
