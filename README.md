@@ -80,7 +80,7 @@ The plugin's test suite has two parts:
 | Tool | Operations | Notes |
 | --- | --- | --- |
 | `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval by default; the `typst-expert` agent template flips it auto-approved). The response's `data.source_id` is the parent `.typ` row (`media.get_source(source_id)` returns the bytes); `data.derivative_id` is the rendered bytes; `data.preview_id` (PDF only) is the first-page PNG sibling. `inspect` is a read-only error-only pass (auto-approved). |
-| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read`, plus `import` for `images`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. `images: import` copies a Media Archive asset into the principal's image library so a follow-up `#image()` can resolve it (Media Archive URLs themselves don't work in `#image()` — ext-typst treats paths as filesystem-relative). Read-only ops are auto-approved; `write` and `delete` require approval. |
+| `typst_resources` | `fonts` / `templates` / `examples` / `images` / `media_assets` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read` for the four filesystem kinds; `import` for `media_assets`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. `media_assets: import` copies a Media Archive asset into the principal's image library so a follow-up `#image()` can resolve it (Media Archive URLs themselves don't work in `#image()` — ext-typst treats paths as filesystem-relative). Read-only ops are auto-approved; `write` and `delete` require approval. |
 
 `typst_compile` accepts the source as either:
 
@@ -238,13 +238,14 @@ filesystem-local; only rendered outputs flow through the media archive.
 For an image that lives in the operator's media archive (e.g. an
 `image_muse` output), `/api/v1/assets/<uuid>.<ext>` does **not** work
 in `#image()` — ext-typst resolves those paths relative to the
-principal's filesystem root. Import the asset first:
+principal's filesystem root. Use the `media_assets` peer operation
+to import the asset first:
 
 ```jsonc
 // step 1 — generate / discover
 image_muse(prompt: "…")                                   → /api/v1/assets/<uuid>.webp
 // step 2 — copy into the principal's image library
-typst_resources(action: "images", op: "import",
+typst_resources(action: "media_assets", op: "import",
                 asset_id: "<uuid>",
                 name: "autumn-mountain-landscape.webp")
                                                           → /api/v1/typst/images/autumn-mountain-landscape.webp

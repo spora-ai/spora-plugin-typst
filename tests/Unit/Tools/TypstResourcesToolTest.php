@@ -132,7 +132,7 @@ describe('kind discriminator', function (): void {
         );
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('unknown action "bogus"');
-        expect($result->content)->toContain('fonts, templates, examples, images');
+        expect($result->content)->toContain('fonts, templates, examples, images, media_assets');
     });
 
     it('rejects an unknown op sub-action verb', function (): void {
@@ -145,6 +145,31 @@ describe('kind discriminator', function (): void {
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('unknown op "wipe"');
         expect($result->content)->toContain('list, write, delete, read, import');
+    });
+
+    it('rejects op=import against the kind actions (cross-action invalid pairing)', function (): void {
+        // `op: "import"` is the verb of `action: "media_assets"` only;
+        // pairing it with the kind actions surfaces a clean error
+        // rather than a silent fall-through.
+        $result = $this->tool->execute(
+            ['action' => 'images', 'op' => 'import'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($result->success)->toBeFalse();
+        expect($result->content)->toContain('action "images" does not accept op "import"');
+        expect($result->content)->toContain('list, write, delete, read');
+
+        // And the mirror direction: `op: "list"` against `media_assets`.
+        $mirror = $this->tool->execute(
+            ['action' => 'media_assets', 'op' => 'list', 'asset_id' => '00000000-0000-4000-8000-000000000000'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+        expect($mirror->success)->toBeFalse();
+        expect($mirror->content)->toContain('action "media_assets" does not accept op "list"');
     });
 });
 
@@ -522,7 +547,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'autumn.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'autumn.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -557,7 +582,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'winter.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'winter.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -576,7 +601,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $firstImport = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetIdA, 'name' => 'shared.png'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetIdA, 'name' => 'shared.png'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -584,7 +609,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         expect($firstImport->success)->toBeTrue();
 
         $secondImport = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetIdB, 'name' => 'shared.png'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetIdB, 'name' => 'shared.png'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -599,7 +624,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     it('rejects when asset_id is missing', function (): void {
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import'],
+            ['action' => 'media_assets', 'op' => 'import'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -612,7 +637,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     it('rejects a malformed asset_id', function (): void {
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => 'not-a-uuid'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => 'not-a-uuid'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -630,7 +655,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'private.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'private.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -644,7 +669,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     it('rejects when the asset row is missing (UUID never existed)', function (): void {
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => '00000000-0000-4000-8000-000000000000', 'name' => 'ghost.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => '00000000-0000-4000-8000-000000000000', 'name' => 'ghost.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -658,7 +683,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'external.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'external.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -674,7 +699,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'song.mp3'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'song.mp3'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -694,7 +719,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'huge.png'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'huge.png'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -709,7 +734,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -724,7 +749,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         $result = $tool->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'My Image (1).webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'My Image (1).webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -742,7 +767,7 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $unwired = new TypstResourcesTool($this->worldFactory);
 
         $result = $unwired->execute(
-            ['action' => 'images', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'a.webp'],
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'a.webp'],
             agentId: 0,
             userId: $this->userId,
             context: $this->context,
@@ -751,12 +776,12 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         expect($result->content)->toContain('MediaAssetReader not wired');
     });
 
-    it('describeAction surfaces the asset_id short form on images/op=import', function (): void {
+    it('describeAction surfaces the asset_id short form on media_assets/op=import', function (): void {
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
         // Use a full UUID — describeAction should truncate to 12 chars.
         $assetId = '01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-        $desc = $tool->describeAction(['action' => 'images', 'op' => 'import', 'asset_id' => $assetId]);
-        expect($desc)->toContain('images/import');
+        $desc = $tool->describeAction(['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId]);
+        expect($desc)->toContain('media_assets/import');
         expect($desc)->toContain('01aaaaaaaaaa');
         expect($desc)->not->toContain($assetId);
     });

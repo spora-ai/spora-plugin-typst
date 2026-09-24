@@ -124,14 +124,16 @@ it('documents the list → read → write iteration loop in the system prompt', 
 
 it('documents the media-archive image import workflow in the system prompt', function (): void {
     // As of v1.3.0 the agent teaches itself the 3-step import recipe
-    // (image_muse → typst_resources(op: "import") → typst_compile) so
-    // it knows that #image(/api/v1/assets/<uuid>.<ext>) doesn't render
-    // directly. Pin the section header + the verb so future rewrites
-    // don't drop the bridge.
+    // (image_muse → typst_resources(action: "media_assets", op: "import")
+    // → typst_compile) so it knows that #image(/api/v1/assets/<uuid>.<ext>)
+    // doesn't render directly. `import` lives on the peer `media_assets`
+    // operation (not as a verb on `images`). Pin the section header,
+    // the action label, and the key phrasing so future rewrites don't
+    // collapse the bridge back into a sub-verb.
     $expert = loadAgentTemplate('typst-expert.json');
     $prompt = (string) ($expert['agent']['system_prompt'] ?? '');
 
     expect($prompt)->toContain('## 5. Embed media-archive images');
-    expect($prompt)->toContain('op: "import"');
+    expect($prompt)->toContain('action: "media_assets", op: "import"');
     expect($prompt)->toContain('filesystem-relative');
 });

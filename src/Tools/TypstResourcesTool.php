@@ -19,18 +19,29 @@ use Throwable;
 
 /**
  * Manage the Typst plugin's per-principal resources: fonts, templates,
- * examples (text-shaped, served by {@see TypstResourceStore}) and
- * images (binary, served by {@see TypstImageStore}). Each resource
- * kind is a separate `#[ToolOperation]`, so the LLM-facing schema
- * lists one row per kind instead of a single row with a kind verb.
+ * examples (text-shaped, served by {@see TypstResourceStore}),
+ * images (binary, served by {@see TypstImageStore}), and the
+ * Media-Archive-to-image-library bridge (`media_assets` operation —
+ * text-shaped action, binary effect).
  *
- * Per-op sub-action `op: list | write | delete | read | import`
- * selects the verb. For `list`, no extra params are needed. For
- * `write`, `name` and `content` are required (text bytes — for
- * binary uploads use the admin panel's typst/images endpoint
- * instead). For `delete` and `read`, only `name` is required.
- * `import` (images only) bridges a Media Archive asset into the
- * per-principal image library — see {@see importImage()}.
+ * Each of the four kinds (`fonts` / `templates` / `examples` /
+ * `images`) is a separate `#[ToolOperation]`, so the LLM-facing
+ * schema lists one row per kind. The fifth operation `media_assets`
+ * is a peer to those four: it bridges a Media Archive UUID into the
+ * per-principal image library so a follow-up `#image("...")` can
+ * resolve it (see {@see importImage()}). Adding it as a peer rather
+ * than a verb on `images` keeps the LLM schema flat and lets the
+ * orchestrator route the call to a single code path that always
+ * carries the same arg shape (`asset_id` + optional `name`).
+ *
+ * Per-op sub-action `op: list | write | delete | read` selects the
+ * verb for the four kind operations. For `list`, no extra params
+ * are needed. For `write`, `name` and `content` are required (text
+ * bytes — for binary uploads use the admin panel's typst/images
+ * endpoint instead). For `delete` and `read`, only `name` is
+ * required. `media_assets` accepts only `op: "import"` (the runtime
+ * matches it directly; the schema's `op` enum still lists `import`
+ * so the validator doesn't reject a clean LLM call).
  *
  * `read` returns the resource's bytes so the LLM can iterate:
  * `list → read → modify → write → render` is the canonical edit
@@ -59,7 +70,7 @@ use Throwable;
  * wraps the autowired reader. Tests construct an in-process reader
  * via {@see \Spora\Services\DatabaseAssetStore} +
  * {@see \Spora\Services\LocalAssetStore} and bind a closure that
- * forwards to it. `null` means the `import` verb is unavailable —
+ * forwards to it. `null` means the import op is unavailable —
  * tool callers should pass a closure when the host has wired the
  * reader; production never sees `null` because DI auto-injects.
  */
@@ -90,21 +101,27 @@ use Throwable;
 )]
 #[ToolOperation(
     name: 'images',
-    description: 'Manage per-principal Typst image resources. list: see visible images. write: upload a new image (text bytes — for binary uploads use the admin panel\'s typst/images endpoint instead). read: fetch an image\'s bytes (base64). delete: remove a tier-2 image. import: copy a Media Archive asset into the principal\'s image library so a follow-up #image() can resolve it.',
+    description: 'Manage per-principal Typst image resources. list: see visible images. write: upload a new image (text bytes — for binary uploads use the admin panel\'s typst/images endpoint instead). read: fetch an image\'s bytes (base64). delete: remove a tier-2 image.',
+    enabledByDefault: true,
+    requiresApprovalByDefault: false,
+)]
+#[ToolOperation(
+    name: 'media_assets',
+    description: 'Copy a Media Archive asset into the principal\'s image library so a follow-up #image("...") can resolve it. The Media Archive\'s /api/v1/assets/<uuid>.<ext> URL does NOT work in #image() directly — ext-typst resolves paths filesystem-relative against the principal\'s storage root, so this op is the bridge. Use `op: "import"` with `asset_id` (UUID; the asset must be visible to the caller) and an optional `name` (defaults to the source asset\'s filename). Mime allowlist: image/png, image/jpeg, image/webp, image/svg+xml; byte size cap 5 MiB.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
     name: 'op',
     type: 'string',
-    description: 'Sub-action: list (default) | write | delete | read | import.',
+    description: 'Sub-action: list (default for the four kind actions) | write | delete | read. Ignored when `action` is `media_assets` (which only accepts `op: "import"`).',
     required: false,
     enum: ['list', 'write', 'delete', 'read', 'import'],
 )]
 #[ToolParameter(
     name: 'name',
     type: 'string',
-    description: 'Resource basename (required for write/delete/read; ignored for list; optional for import — falls back to the source asset\'s filename). Allowed: A-Z a-z 0-9 . _ -',
+    description: 'Resource basename (required for write/delete/read; ignored for list; optional for media_assets import — falls back to the source asset\'s filename). Allowed: A-Z a-z 0-9 . _ -',
     required: false,
 )]
 #[ToolParameter(
@@ -116,7 +133,7 @@ use Throwable;
 #[ToolParameter(
     name: 'asset_id',
     type: 'string',
-    description: 'Media Archive UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, with optional .ext) for op=import. Required. The asset must be visible to the caller; mime must be in the image allowlist (image/png, image/jpeg, image/webp, image/svg+xml); byte size must be ≤ 5 MiB.',
+    description: 'Media Archive UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, with optional .ext) for action="media_assets". Required. The asset must be visible to the caller; mime must be in the image allowlist (image/png, image/jpeg, image/webp, image/svg+xml); byte size must be ≤ 5 MiB.',
     required: false,
 )]
 final class TypstResourcesTool extends AbstractTypstTool
@@ -161,6 +178,16 @@ final class TypstResourcesTool extends AbstractTypstTool
             ));
         }
 
+        // Each action accepts a specific subset of the `op` enum.
+        // The schema validates the bare enum against the union, but
+        // the per-action filter rejects nonsensical pairings
+        // (e.g. action="images" + op="import" — that path is now
+        // action="media_assets").
+        $opError = $this->validateOpForAction($action, $op);
+        if ($opError !== null) {
+            return new ToolResult(false, $opError);
+        }
+
         // Build the resource store scoped to *this* call's principal.
         // The constructor-injected stores were always null-principal
         // (PHP-DI wires the singleton at boot before any request has
@@ -172,14 +199,13 @@ final class TypstResourcesTool extends AbstractTypstTool
         $paths = new TypstResourcePaths($this->paths(), $context?->principalId);
 
         return match ($action) {
-            'fonts'     => $this->dispatchResource($paths, 'font', $op, $arguments),
-            'templates' => $this->dispatchResource($paths, 'template', $op, $arguments),
-            'examples'  => $this->dispatchResource($paths, 'example', $op, $arguments),
-            'images'    => $op === 'import'
-                ? $this->importImage($paths, $arguments, $context, $userId)
-                : $this->dispatchImage($paths, $op, $arguments),
-            default     => new ToolResult(false, sprintf(
-                'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images)',
+            'fonts'        => $this->dispatchResource($paths, 'font', $op, $arguments),
+            'templates'    => $this->dispatchResource($paths, 'template', $op, $arguments),
+            'examples'     => $this->dispatchResource($paths, 'example', $op, $arguments),
+            'images'       => $this->dispatchImage($paths, $op, $arguments),
+            'media_assets' => $this->importImage($paths, $arguments, $context, $userId),
+            default        => new ToolResult(false, sprintf(
+                'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images, media_assets)',
                 $action,
             )),
         };
@@ -189,15 +215,44 @@ final class TypstResourcesTool extends AbstractTypstTool
     {
         $action = $this->resolveAction($arguments);
         $op     = strtolower((string) ($arguments['op'] ?? 'list'));
-        // For `images/op=import` the meaningful identifier is the
-        // Media Archive UUID, not `name` (which is the destination
-        // basename and may be absent). Truncate to 8 chars so the
+        // For `media_assets/op=import` the meaningful identifier is
+        // the Media Archive UUID, not `name` (which is the destination
+        // basename and may be absent). Truncate to 12 chars so the
         // approval row stays narrow.
-        $tag = $op === 'import' && $action === 'images'
+        $tag = $action === 'media_assets'
             ? (string) ($arguments['asset_id'] ?? '')
             : (string) ($arguments['name'] ?? '');
         $tag = $tag !== '' ? $tag : (string) ($arguments['asset_id'] ?? '');
         return sprintf('Typst resources %s/%s%s', $action, $op, $tag !== '' ? ':' . substr($tag, 0, 12) : '');
+    }
+
+    /**
+     * Per-action op filter. The tool-level enum accepts the union of
+     * every verb, but a given action rejects mismatched pairings
+     * (e.g. `images` + `import` — that's `media_assets` now). Returns
+     * the error message or `null` when the pairing is valid.
+     * `null` for unknown actions — the dispatcher's `default` arm
+     * owns that error message.
+     */
+    private function validateOpForAction(string $action, string $op): ?string
+    {
+        $validOps = match ($action) {
+            'fonts', 'templates', 'examples', 'images' => ['list', 'write', 'delete', 'read'],
+            'media_assets'                             => ['import'],
+            default                                    => null,
+        };
+        if ($validOps === null) {
+            return null;
+        }
+        if (!in_array($op, $validOps, true)) {
+            return sprintf(
+                'typst_resources: action "%s" does not accept op "%s" (expected one of: %s)',
+                $action,
+                $op,
+                implode(', ', $validOps),
+            );
+        }
+        return null;
     }
 
     private function dispatchResource(TypstResourcePaths $paths, string $kind, string $op, array $arguments): ToolResult
