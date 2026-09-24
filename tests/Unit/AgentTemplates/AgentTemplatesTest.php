@@ -98,7 +98,7 @@ it('pins the per-operation approval semantics on typst_compile and typst_resourc
     expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstCompileTool']['inspect']['auto_approve'] ?? null)
         ->toBeTrue('inspect must be auto-approved');
 
-    foreach (['fonts', 'templates', 'examples', 'images'] as $kind) {
+    foreach (['fonts', 'templates', 'examples', 'images', 'media_assets'] as $kind) {
         expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstResourcesTool'][$kind]['auto_approve'] ?? null)
             ->toBeTrue("resources.{$kind} must be auto-approved");
     }

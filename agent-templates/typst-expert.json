@@ -52,6 +52,11 @@
                     "name": "images",
                     "enabled": true,
                     "auto_approve": true
+                },
+                {
+                    "name": "media_assets",
+                    "enabled": true,
+                    "auto_approve": true
                 }
             ]
         },

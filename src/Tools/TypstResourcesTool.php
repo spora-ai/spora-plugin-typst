@@ -96,7 +96,7 @@ use Throwable;
 #[ToolParameter(
     name: 'op',
     type: 'string',
-    description: 'Sub-action: list (default for the four kind actions) | write | delete | read. Ignored when `action` is `media_assets` (which only accepts `op: "import"`).',
+    description: 'Sub-action: list (default for the four kind actions) | write | delete | read. For action="media_assets", op must be "import".',
     required: false,
     enum: ['list', 'write', 'delete', 'read', 'import'],
 )]
@@ -123,7 +123,7 @@ final class TypstResourcesTool extends AbstractTypstTool
     private const TOOL_PREFIX = 'typst_resources: ';
 
     /**
-     * @var (Closure(string $id, ?int $userId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, filename?: ?string, sourceUrl?: string}|null)|null
+     * @var (Closure(string $id, ?int $userId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, sourceUrl?: string}|null)|null
      */
     private readonly ?Closure $mediaAssetReader;
 
@@ -174,7 +174,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             'templates'    => $this->dispatchResource($paths, 'template', $op, $arguments),
             'examples'     => $this->dispatchResource($paths, 'example', $op, $arguments),
             'images'       => $this->dispatchImage($paths, $op, $arguments),
-            'media_assets' => $this->importImage($paths, $arguments, $context, $userId),
+            'media_assets' => $this->importImage($paths, $arguments, $userId),
             default        => new ToolResult(false, sprintf(
                 'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images, media_assets)',
                 $action,
@@ -186,14 +186,13 @@ final class TypstResourcesTool extends AbstractTypstTool
     {
         $action = $this->resolveAction($arguments);
         $op     = strtolower((string) ($arguments['op'] ?? 'list'));
-        // For `media_assets/op=import` the meaningful identifier is
-        // the Media Archive UUID, not `name` (which is the destination
-        // basename and may be absent). Truncate to 12 chars so the
-        // approval row stays narrow.
+        // Use the source UUID for `media_assets/op=import` (the
+        // meaningful identifier); fall back to `name` for the
+        // filesystem kinds, then to `asset_id` for both. Truncate to
+        // 12 chars so the approval row stays narrow.
         $tag = $action === 'media_assets'
             ? (string) ($arguments['asset_id'] ?? '')
-            : (string) ($arguments['name'] ?? '');
-        $tag = $tag !== '' ? $tag : (string) ($arguments['asset_id'] ?? '');
+            : ((string) ($arguments['name'] ?? '') ?: (string) ($arguments['asset_id'] ?? ''));
         return sprintf('Typst resources %s/%s%s', $action, $op, $tag !== '' ? ':' . substr($tag, 0, 12) : '');
     }
 
@@ -481,34 +480,60 @@ final class TypstResourcesTool extends AbstractTypstTool
 
     /**
      * Copy a Media Archive asset into the principal's image library.
-     *
-     * ext-typst treats every `#image()` path as filesystem-relative
-     * against the principal's `template_dir`, so the canonical
-     * `/api/v1/assets/<uuid>.<ext>` URL doesn't resolve; the
-     * image-library URL `/api/v1/typst/images/<basename>` does,
-     * because we just wrote the file under that same `template_dir`.
-     * Importing is the bridge.
+     * ext-typst treats every `#image()` path as filesystem-relative,
+     * so the canonical `/api/v1/assets/<uuid>.<ext>` URL doesn't
+     * resolve; the image-library URL does, because we just wrote the
+     * file under the principal's `template_dir`. Importing is the
+     * bridge.
      */
     private function importImage(
         TypstResourcePaths $paths,
         array $arguments,
-        ?PrincipalContext $context,
         ?int $userId,
     ): ToolResult {
+        $assetId = $this->resolveImportAssetId($arguments);
+        if ($assetId instanceof ToolResult) {
+            return $assetId;
+        }
+
+        $payload = $this->fetchImportPayload($assetId, $userId);
+        if ($payload instanceof ToolResult) {
+            return $payload;
+        }
+
+        return $this->writeImportedImage($paths, $arguments, $assetId, $payload);
+    }
+
+    /**
+     * @return non-empty-string|ToolResult
+     */
+    private function resolveImportAssetId(array $arguments): string|ToolResult
+    {
         $assetId = (string) ($arguments['asset_id'] ?? '');
         if ($assetId === '') {
             return new ToolResult(false, 'typst_resources: `asset_id` is required for op=import');
         }
-        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $assetId) !== 1) {
+        if (preg_match(
+            '/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.[A-Za-z0-9]+)?$/i',
+            $assetId,
+            $m,
+        ) !== 1) {
             return new ToolResult(false, sprintf(
                 'typst_resources: invalid asset_id "%s" (expected 36-char UUID, optional .ext stripped)',
                 $assetId,
             ));
         }
+        return $m[1];
+    }
+
+    /**
+     * @return array{status: string, bytes?: string, mime?: string, sourceUrl?: string}|ToolResult
+     */
+    private function fetchImportPayload(string $assetId, ?int $userId): array|ToolResult
+    {
         if ($this->mediaAssetReader === null) {
             return new ToolResult(false, 'typst_resources: import is not configured (MediaAssetReader not wired)');
         }
-
         $payload = ($this->mediaAssetReader)($assetId, $userId);
         if ($payload === null) {
             return new ToolResult(false, sprintf(
@@ -516,6 +541,32 @@ final class TypstResourcesTool extends AbstractTypstTool
                 $assetId,
             ));
         }
+        return $payload;
+    }
+
+    private function writeImportedImage(
+        TypstResourcePaths $paths,
+        array $arguments,
+        string $assetId,
+        array $payload,
+    ): ToolResult {
+        $shape = $this->validateImportShape($assetId, $payload);
+        if ($shape !== null) {
+            return $shape;
+        }
+
+        $bytes  = (string) ($payload['bytes'] ?? '');
+        $status = (string) ($payload['status'] ?? '');
+        $size   = $this->validateImportSize($assetId, $bytes, $status);
+        if ($size !== null) {
+            return $size;
+        }
+
+        return $this->writeImportBytes($paths, $arguments, $assetId, $payload);
+    }
+
+    private function validateImportShape(string $assetId, array $payload): ?ToolResult
+    {
         $status = (string) ($payload['status'] ?? '');
         if ($status === 'external') {
             return new ToolResult(false, sprintf(
@@ -525,9 +576,7 @@ final class TypstResourcesTool extends AbstractTypstTool
                 $assetId,
             ));
         }
-
-        $mime  = strtolower(trim((string) ($payload['mime'] ?? '')));
-        $bytes = (string) ($payload['bytes'] ?? '');
+        $mime = strtolower(trim((string) ($payload['mime'] ?? '')));
         if (!TypstImageStore::isAllowedMime($mime)) {
             return new ToolResult(false, sprintf(
                 'typst_resources: media asset %s has mime "%s", which is not a supported image '
@@ -536,6 +585,11 @@ final class TypstResourcesTool extends AbstractTypstTool
                 $mime,
             ));
         }
+        return null;
+    }
+
+    private function validateImportSize(string $assetId, string $bytes, string $status): ?ToolResult
+    {
         if ($bytes === '') {
             return new ToolResult(false, sprintf(
                 'typst_resources: media asset %s has zero readable bytes (storage_mode=%s)',
@@ -552,17 +606,19 @@ final class TypstResourcesTool extends AbstractTypstTool
                 TypstImageStore::MAX_BYTES,
             ));
         }
+        return null;
+    }
 
-        $name = (string) ($arguments['name'] ?? '');
-        // The closure doesn't carry the source `filename` (its signature
-        // mirrors MediaAssetReader::readAsset()), so resolve it here
-        // after the ownership check has already passed.
-        if ($name === '') {
-            $source = MediaAsset::query()->find($assetId);
-            if ($source !== null && is_string($source->filename) && $source->filename !== '') {
-                $name = $source->filename;
-            }
-        }
+    private function writeImportBytes(
+        TypstResourcePaths $paths,
+        array $arguments,
+        string $assetId,
+        array $payload,
+    ): ToolResult {
+        $mime  = strtolower(trim((string) ($payload['mime'] ?? '')));
+        $bytes = (string) ($payload['bytes'] ?? '');
+        $name  = $this->resolveImportName($arguments, $assetId);
+
         try {
             $row = (new TypstImageStore($paths))->write(
                 $bytes,
@@ -573,18 +629,32 @@ final class TypstResourcesTool extends AbstractTypstTool
             return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
         }
 
-        $url = '/api/v1/typst/images/' . rawurlencode($row['name']);
         return ToolResult::ok(
             sprintf('typst_resources: imported media asset %s as image/%s (%d bytes)', $assetId, $row['name'], $row['size']),
             [
                 'asset_id'      => $assetId,
                 'name'          => $row['name'],
-                'url'           => $url,
+                'url'           => '/api/v1/typst/images/' . rawurlencode($row['name']),
                 'mime'          => $row['mime'],
                 'size'          => $row['size'],
                 'renamed'       => (bool) $row['renamed'],
                 'original_name' => $row['original_name'],
             ],
         );
+    }
+
+    /**
+     * The closure seam doesn't carry the source `filename` (its
+     * signature mirrors `MediaAssetReader::readAsset()`), so resolve
+     * it here after the ownership check has already passed.
+     */
+    private function resolveImportName(array $arguments, string $assetId): string
+    {
+        $name = (string) ($arguments['name'] ?? '');
+        if ($name !== '') {
+            return $name;
+        }
+        $source = MediaAsset::query()->find($assetId);
+        return ($source !== null && is_string($source->filename)) ? $source->filename : '';
     }
 }

@@ -620,6 +620,26 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         expect($result->content)->toContain('invalid asset_id');
     });
 
+    it('accepts an asset_id with an optional .ext suffix (matching the description and Muse)', function (): void {
+        // The `asset_id` ToolParameter description advertises
+        // "Media Archive UUID … with optional .ext", and the Muse
+        // plugin's resolver does the same stripping. Pin that the
+        // import op honours it — passes the bare UUID through to the
+        // closure and returns it on the response.
+        [$assetId] = seedMediaAsset($this->userId, 'image/webp', 'BYTES', 'a.webp');
+
+        $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
+        $result = $tool->execute(
+            ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId . '.webp', 'name' => 'a.webp'],
+            agentId: 0,
+            userId: $this->userId,
+            context: $this->context,
+        );
+
+        expect($result->success)->toBeTrue();
+        expect($result->data['asset_id'])->toBe($assetId);
+    });
+
     it('rejects when the asset is not accessible to the caller (ownership union mirror)', function (): void {
         $outsiderId = $this->auth->register('outsider-' . bin2hex(random_bytes(4)) . '@example.com', 'Password1!', 'Outsider');
         [$assetId] = seedMediaAsset($outsiderId, 'image/webp', 'PRIVATE-BYTES', 'private.webp');
