@@ -6,6 +6,7 @@ use Spora\Core\Paths;
 use Spora\Core\SecurityManager;
 use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
+use Spora\Plugins\Typst\Services\TypstImageImporter;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
@@ -64,7 +65,7 @@ beforeEach(function () {
  */
 function toolWithReader(TypstWorldFactory $worldFactory, Closure $mediaReaderFn): TypstResourcesTool
 {
-    return new TypstResourcesTool($worldFactory, $mediaReaderFn);
+    return new TypstResourcesTool($worldFactory, new TypstImageImporter($mediaReaderFn));
 }
 
 /**
