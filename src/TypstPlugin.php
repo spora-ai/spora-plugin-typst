@@ -111,21 +111,11 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
             TypstPlaygroundSourceController::class => \DI\autowire(),
             TypstCompileTool::class                => \DI\autowire(),
             TypstResourcesTool::class              => \DI\autowire()
-                // `op=import` reads Media Archive asset bytes through a
-                // closure the host injects — see
-                // {@see TypstResourcesTool::importImage()}. The plugin
-                // owns no direct dependency on the host's `final`
-                // `MediaAssetReader`; the closure is the seam, mirroring
-                // the muse plugin's `MuseImageArchiveResolver` pattern.
+                // Closure seam — keeps the plugin decoupled from the
+                // host's `final` MediaAssetReader (mirrors muse's
+                // MuseImageArchiveResolver); see
+                // {@see TypstResourcesTool::importImage()}.
                 ->constructorParameter('mediaAssetReader', \DI\factory(static function (MediaAssetReader $reader): Closure {
-                    // Bridge to {@see MediaAssetReader::readAsset()}, the
-                    // host's ownership-union-checked read shape. The
-                    // plugin takes a closure rather than the concrete
-                    // `final` service so it stays decoupled (mirrors
-                    // muse's `MuseImageArchiveResolver` pattern). The
-                    // importer resolves the source filename via a
-                    // separate direct `MediaAsset::find()` call after
-                    // the ownership check passes here.
                     return static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
                 })),
         ]);

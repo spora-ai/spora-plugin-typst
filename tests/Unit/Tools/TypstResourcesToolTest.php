@@ -36,11 +36,8 @@ beforeEach(function () {
         $this->worldFactory,
     );
 
-    // The `import` verb needs a `MediaAssetReader` closure. Tests
-    // that exercise `import` rebuild the tool with the wired
-    // closure via `toolWithReader()`; tests that don't, leave the
-    // closure as `null` so they don't drag the full DB/LocalAsset
-    // wiring into every case.
+    // `import` tests get the wired closure; non-import tests use the
+    // default-null tool so they don't drag DB/LocalAsset wiring.
     $this->database = new DatabaseAssetStore(50 * 1024 * 1024);
     $this->local    = new LocalAssetStore(
         new Paths(sys_get_temp_dir()),
@@ -48,10 +45,7 @@ beforeEach(function () {
         50 * 1024 * 1024,
     );
     $this->mediaReader = new MediaAssetReader($this->database, $this->local);
-    // The closure receives the live reader via `use` rather than
-    // `$this->mediaReader->...` because `static fn` doesn't bind
-    // `$this`. The reader is the same instance for the whole test
-    // (storing it once also keeps the bridge's identity stable).
+    // `static fn` doesn't bind $this — capture the reader via `use`.
     $reader = $this->mediaReader;
     $this->mediaReaderFn = static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
 
@@ -64,14 +58,9 @@ beforeEach(function () {
 });
 
 /**
- * Build a fresh tool instance with the MediaAssetReader closure
- * wired in. Returns a new tool (the existing one stays around so
- * non-import tests don't accidentally pick up the closure).
- *
  * Takes the deps explicitly so PHPStan can verify the call against
- * the `TypstResourcesTool` signature instead of fishing them out of
- * Pest's `$this` (which is typed as `TestCall|…` and has no
- * `worldFactory` / `mediaReaderFn` properties).
+ * the `TypstResourcesTool` signature — Pest's `$this` is typed as
+ * `TestCall|…` and has no `worldFactory` / `mediaReaderFn` properties.
  */
 function toolWithReader(TypstWorldFactory $worldFactory, Closure $mediaReaderFn): TypstResourcesTool
 {
@@ -79,9 +68,8 @@ function toolWithReader(TypstWorldFactory $worldFactory, Closure $mediaReaderFn)
 }
 
 /**
- * Materialise a `data_url`-mode media_assets row, returning the
- * UUID. `bytes` go straight into `payload`. Pass
- * `external: true` for the external-mode branch.
+ * `bytes` go straight into `payload` (data_url mode by default;
+ * pass `external: true` to flip the branch).
  *
  * @return array{0: string, 1: MediaAsset}
  */
@@ -148,9 +136,6 @@ describe('kind discriminator', function (): void {
     });
 
     it('rejects op=import against the kind actions (cross-action invalid pairing)', function (): void {
-        // `op: "import"` is the verb of `action: "media_assets"` only;
-        // pairing it with the kind actions surfaces a clean error
-        // rather than a silent fall-through.
         $result = $this->tool->execute(
             ['action' => 'images', 'op' => 'import'],
             agentId: 0,
@@ -161,7 +146,6 @@ describe('kind discriminator', function (): void {
         expect($result->content)->toContain('action "images" does not accept op "import"');
         expect($result->content)->toContain('list, write, delete, read');
 
-        // And the mirror direction: `op: "list"` against `media_assets`.
         $mirror = $this->tool->execute(
             ['action' => 'media_assets', 'op' => 'list', 'asset_id' => '00000000-0000-4000-8000-000000000000'],
             agentId: 0,
@@ -540,8 +524,6 @@ describe('op: read (images)', function (): void {
 
 describe('op: import (Media Archive → image library bridge)', function (): void {
     it('copies a data_url-mode webp asset into the principal\'s image library', function (): void {
-        // A genuinely webp-shaped payload is unimportant — the test
-        // only exercises the bridge; the asset's mime is the input.
         $bytes = "RIFF\x00\x00\x00\x00WEBP-BYTES";
         [$assetId] = seedMediaAsset($this->userId, 'image/webp', $bytes, 'autumn.webp');
 
@@ -562,21 +544,14 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         expect($result->data['renamed'])->toBeFalse();
         expect($result->data['original_name'])->toBeNull();
 
-        // Persistence side-effect: the file actually landed on disk
-        // under the principal's image dir. Use BASE_PATH so the test
-        // resolves the same root the tool wrote to (`$this->paths()`
-        // inside the tool pins against `BASE_PATH`, not the test's
-        // own `Paths(sys_get_temp_dir())`).
+        // Read back via BASE_PATH: the tool's $this->paths() pins
+        // against BASE_PATH, not the test's own sys_get_temp_dir().
         $store = new TypstImageStore(new TypstResourcePaths(new Paths(BASE_PATH), $this->principalId));
         $roundTrip = $store->read('autumn.webp');
         expect($roundTrip)->toBe($bytes);
     });
 
     it('honours data_url and local storage modes equally (regression: bytes path)', function (): void {
-        // The two storage modes return identical {status, bytes, mime}
-        // shapes from MediaAssetReader::readAsset(), so the import path
-        // can be one branch. Pin the local-mode row to prove both
-        // sides route through the same body-shaping code.
         $bytes = "WEBP-LOCAL-MODE";
         [$assetId] = seedMediaAsset($this->userId, 'image/webp', $bytes, 'winter.webp');
 
@@ -616,7 +591,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         );
         expect($secondImport->success)->toBeTrue();
 
-        // Final disk state reflects the second asset's bytes.
         $store = new TypstImageStore(new TypstResourcePaths(new Paths(BASE_PATH), $this->principalId));
         expect($store->read('shared.png'))->toBe('SECOND-BYTES-LONGER');
     });
@@ -647,9 +621,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     });
 
     it('rejects when the asset is not accessible to the caller (ownership union mirror)', function (): void {
-        // The asset is owned by a different user. MediaAssetReader
-        // returns null for cross-user lookups, and the tool surfaces
-        // that as a not-found error so the LLM can self-correct.
         $outsiderId = $this->auth->register('outsider-' . bin2hex(random_bytes(4)) . '@example.com', 'Password1!', 'Outsider');
         [$assetId] = seedMediaAsset($outsiderId, 'image/webp', 'PRIVATE-BYTES', 'private.webp');
 
@@ -710,9 +681,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     });
 
     it('rejects assets whose byte size exceeds the 5 MiB image cap', function (): void {
-        // Build the payload slightly over the cap (5 MiB + 1).
-        // Same shape as TypstImageStore::MAX_BYTES so the assertion
-        // matches production behaviour.
         $cap = 5 * 1024 * 1024;
         $bytes = str_repeat("\xff", $cap + 1);
         [$assetId] = seedMediaAsset($this->userId, 'image/png', $bytes, 'huge.png');
@@ -761,8 +729,8 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
     });
 
     it('returns failure when the closure is not wired (null MediaAssetReader)', function (): void {
-        // Build a tool WITHOUT the closure; this matches a host that
-        // hasn't run onContainerBuilding() yet (test misconfig).
+        // A null closure matches a host that hasn't run
+        // onContainerBuilding() yet — the misconfig guard path.
         [$assetId] = seedMediaAsset($this->userId, 'image/webp', 'BYTES', 'a.webp');
         $unwired = new TypstResourcesTool($this->worldFactory);
 
@@ -778,7 +746,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
 
     it('describeAction surfaces the asset_id short form on media_assets/op=import', function (): void {
         $tool = toolWithReader($this->worldFactory, $this->mediaReaderFn);
-        // Use a full UUID — describeAction should truncate to 12 chars.
         $assetId = '01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
         $desc = $tool->describeAction(['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId]);
         expect($desc)->toContain('media_assets/import');

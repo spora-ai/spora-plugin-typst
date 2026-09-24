@@ -21,27 +21,14 @@ use Throwable;
  * Manage the Typst plugin's per-principal resources: fonts, templates,
  * examples (text-shaped, served by {@see TypstResourceStore}),
  * images (binary, served by {@see TypstImageStore}), and the
- * Media-Archive-to-image-library bridge (`media_assets` operation —
- * text-shaped action, binary effect).
+ * Media-Archive-to-image-library bridge (`media_assets` operation).
  *
  * Each of the four kinds (`fonts` / `templates` / `examples` /
  * `images`) is a separate `#[ToolOperation]`, so the LLM-facing
- * schema lists one row per kind. The fifth operation `media_assets`
- * is a peer to those four: it bridges a Media Archive UUID into the
- * per-principal image library so a follow-up `#image("...")` can
- * resolve it (see {@see importImage()}). Adding it as a peer rather
- * than a verb on `images` keeps the LLM schema flat and lets the
- * orchestrator route the call to a single code path that always
- * carries the same arg shape (`asset_id` + optional `name`).
- *
- * Per-op sub-action `op: list | write | delete | read` selects the
- * verb for the four kind operations. For `list`, no extra params
- * are needed. For `write`, `name` and `content` are required (text
- * bytes — for binary uploads use the admin panel's typst/images
- * endpoint instead). For `delete` and `read`, only `name` is
- * required. `media_assets` accepts only `op: "import"` (the runtime
- * matches it directly; the schema's `op` enum still lists `import`
- * so the validator doesn't reject a clean LLM call).
+ * schema lists one row per kind. `media_assets` is a peer to those
+ * four rather than a verb on `images` so the orchestrator routes the
+ * call to a single code path with a fixed arg shape (`asset_id` +
+ * optional `name`); see {@see importImage()}.
  *
  * `read` returns the resource's bytes so the LLM can iterate:
  * `list → read → modify → write → render` is the canonical edit
@@ -63,16 +50,11 @@ use Throwable;
  * {@see TypstResourceStore::MAX_BYTES}.
  *
  * The `mediaAssetReader` closure is an indirection into the host's
- * {@see \Spora\Services\MediaArchive\MediaAssetReader::readAsset()};
- * the plugin takes a closure rather than the concrete service so it
- * stays decoupled from the `final` core class. The DI binding
+ * `final` {@see MediaAssetReader}; the DI binding
  * ({@see \Spora\Plugins\Typst\TypstPlugin::onContainerBuilding()})
- * wraps the autowired reader. Tests construct an in-process reader
- * via {@see \Spora\Services\DatabaseAssetStore} +
- * {@see \Spora\Services\LocalAssetStore} and bind a closure that
- * forwards to it. `null` means the import op is unavailable —
- * tool callers should pass a closure when the host has wired the
- * reader; production never sees `null` because DI auto-injects.
+ * wraps the autowired reader so the plugin stays decoupled from the
+ * core class. `null` means the import op is unavailable; production
+ * never sees `null` because DI auto-injects.
  */
 #[Tool(
     name: 'typst_resources',
@@ -141,14 +123,6 @@ final class TypstResourcesTool extends AbstractTypstTool
     private const TOOL_PREFIX = 'typst_resources: ';
 
     /**
-     * Closure signature mirrors
-     * {@see \Spora\Services\MediaArchive\MediaAssetReader::readAsset()}'s
-     * return shape, plus the source asset's `filename` so `import` can
-     * default the destination basename. `null` only when DI has not
-     * wired a reader (test paths that don't exercise `import`);
-     * production always injects a closure that forwards into the live
-     * core service plus one `MediaAsset::find()` for the filename.
-     *
      * @var (Closure(string $id, ?int $userId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, filename?: ?string, sourceUrl?: string}|null)|null
      */
     private readonly ?Closure $mediaAssetReader;
@@ -178,11 +152,8 @@ final class TypstResourcesTool extends AbstractTypstTool
             ));
         }
 
-        // Each action accepts a specific subset of the `op` enum.
-        // The schema validates the bare enum against the union, but
-        // the per-action filter rejects nonsensical pairings
-        // (e.g. action="images" + op="import" — that path is now
-        // action="media_assets").
+        // Schema accepts the union of verbs; this filter rejects
+        // per-action nonsensical pairings (e.g. images + import).
         $opError = $this->validateOpForAction($action, $op);
         if ($opError !== null) {
             return new ToolResult(false, $opError);
@@ -227,12 +198,8 @@ final class TypstResourcesTool extends AbstractTypstTool
     }
 
     /**
-     * Per-action op filter. The tool-level enum accepts the union of
-     * every verb, but a given action rejects mismatched pairings
-     * (e.g. `images` + `import` — that's `media_assets` now). Returns
-     * the error message or `null` when the pairing is valid.
-     * `null` for unknown actions — the dispatcher's `default` arm
-     * owns that error message.
+     * Returns null for unknown actions — the dispatcher's `default`
+     * arm owns that error message.
      */
     private function validateOpForAction(string $action, string $op): ?string
     {
@@ -513,31 +480,14 @@ final class TypstResourcesTool extends AbstractTypstTool
     }
 
     /**
-     * Copy a Media Archive asset into the principal's image library
-     * so a follow-up `#image("...")` call can resolve it.
+     * Copy a Media Archive asset into the principal's image library.
      *
      * ext-typst treats every `#image()` path as filesystem-relative
-     * against the principal's `template_dir`, so `/api/v1/assets/<uuid>.<ext>`
-     * references resolve to `<storage>/typst/<principal>/api/v1/...`
-     * — which never exists. The image-library URL
-     * `/api/v1/typst/images/<basename>`, in contrast, points at a
-     * file we just wrote under that same `template_dir`. Importing
-     * is the bridge: read the bytes from the Media Archive (with
-     * the same ownership union `media.get_source` enforces), validate
-     * the mime + size, persist via {@see TypstImageStore::write()},
-     * and hand the LLM the URL to paste into `#image()`.
-     *
-     * `import` is `images`-only; it deliberately doesn't show up on
-     * `fonts` / `templates` / `examples` because Typst's only image
-     * reference form is `#image()`. External-mode assets (those the
-     * ingest pipeline kept by URL only because the body fetch failed)
-     * are rejected — there are no Spora-side bytes to copy.
-     *
-     * Runs the `MediaAssetReader` read through a closure the host
-     * injects (see {@see self::$mediaAssetReader}). The closure is
-     * `null` only in test harnesses that don't exercise `import`;
-     * production always has one because {@see \Spora\Plugins\Typst\TypstPlugin::onContainerBuilding()}
-     * binds the live core service.
+     * against the principal's `template_dir`, so the canonical
+     * `/api/v1/assets/<uuid>.<ext>` URL doesn't resolve; the
+     * image-library URL `/api/v1/typst/images/<basename>` does,
+     * because we just wrote the file under that same `template_dir`.
+     * Importing is the bridge.
      */
     private function importImage(
         TypstResourcePaths $paths,
@@ -604,13 +554,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         }
 
         $name = (string) ($arguments['name'] ?? '');
-        // Fall back to the source asset's filename when the caller
-        // didn't supply one. The closure already passed the
-        // ownership check via `MediaAssetReader::readAsset()` returning
-        // a payload; a single direct `MediaAsset::find()` per import
-        // gives the importer the original filename without forcing
-        // the closure signature to widen. Unsafe filenames flow
-        // through `TypstImageStore::write()`'s sanitiser.
+        // The closure doesn't carry the source `filename` (its signature
+        // mirrors MediaAssetReader::readAsset()), so resolve it here
+        // after the ownership check has already passed.
         if ($name === '') {
             $source = MediaAsset::query()->find($assetId);
             if ($source !== null && is_string($source->filename) && $source->filename !== '') {
