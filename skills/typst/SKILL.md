@@ -36,7 +36,7 @@ Two tools, three jobs:
 | --- | --- | --- | --- |
 | `typst_compile` | `action: "inspect"` | Run the inspector on a source; return structured errors and warnings only | First pass on a new source. Cheap; no media-derivative row is created. |
 | `typst_compile` | `action: "render"` | Compile the source to PDF/PNG/SVG and persist it as a media-derivative | When the inspector returns clean, or when the operator has approved a known-imperfect render. |
-| `typst_resources` | `action: "fonts" / "templates" / "examples" / "images"`, `op: "list" / "write" / "delete" / "read"` | Manage per-principal resources | When the user wants to upload a brand font, save a reusable template, or store an image asset. `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`). |
+| `typst_resources` | `action: "fonts" / "templates" / "examples" / "images" / "media_assets"`; `op: "list" / "write" / "delete" / "read"` for the four kind actions, `op: "import"` for `media_assets` | Manage per-principal resources | When the user wants to upload a brand font, save a reusable template, or store an image asset. `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`). Use `media_assets/op: import` to copy a Media Archive asset into the image library so a follow-up `#image()` call can resolve it (see **Referencing assets** below). |
 
 For routine compiles, the flow is `typst_compile(action: "inspect")` → fix → `typst_compile(action: "render")`. Skip the inspect step when the user has already iterated and the source is small enough to inspect inline.
 
@@ -293,12 +293,34 @@ the admin panel). The URL is returned in the upload response — paste
 it into your `typst_compile(action: "render")` source.
 
 For images already in the operator's media archive (uploaded by
-other plugins or agents), use the media archive's canonical URL
-`/api/v1/assets/<uuid>.<ext>`:
+other plugins or agents, e.g. `image_muse` output), the Media
+Archive's `/api/v1/assets/<uuid>.<ext>` URL does **not** work
+directly in `#image()` — ext-typst resolves `#image()` paths
+relative to the principal's filesystem root, not via HTTP. Use
+the `media_assets` operation to bridge the asset into the
+principal's image library, then use the returned URL:
 
-```typst
-#image("/api/v1/assets/01HXYZ....png", width: 80%)
+```text
+1. image_muse(prompt: "…")                                      → asset_urls: ["/api/v1/assets/<uuid>.webp"]
+2. typst_resources(action: "media_assets", op: "import",
+                   asset_id: "<uuid>",
+                   name: "autumn-mountain-landscape.webp")
+                                                              → /api/v1/typst/images/autumn-mountain-landscape.webp
+3. typst_compile(action: "render",
+                 source: "#image(\"/api/v1/typst/images/autumn-mountain-landscape.webp\", width: 80%)",
+                 format: "pdf")
+                                                              → PDF deliverable
 ```
+
+`action: "media_assets", op: "import"` works on assets with
+`data_url` or `local` `storage_mode` that are visible to the
+caller (same ownership union `media.get_source` enforces).
+External-mode assets (those the ingest pipeline kept by URL only)
+are rejected — ask the source plugin to re-ingest with bytes,
+or upload via the Images tab. Allowed image mimes are `image/png`,
+`image/jpeg`, `image/webp`, `image/svg+xml`; the per-asset byte
+cap is 5 MiB (matches the upload-side cap). Import is idempotent —
+re-importing the same `(principal, name)` overwrites the file.
 
 The renderer's `MediaEmbed` markdown uses this same URL surface,
 so operator-pasted playground outputs and agent-generated renders

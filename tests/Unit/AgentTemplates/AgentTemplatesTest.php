@@ -98,7 +98,7 @@ it('pins the per-operation approval semantics on typst_compile and typst_resourc
     expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstCompileTool']['inspect']['auto_approve'] ?? null)
         ->toBeTrue('inspect must be auto-approved');
 
-    foreach (['fonts', 'templates', 'examples', 'images'] as $kind) {
+    foreach (['fonts', 'templates', 'examples', 'images', 'media_assets'] as $kind) {
         expect($opsByClass['Spora\\Plugins\\Typst\\Tools\\TypstResourcesTool'][$kind]['auto_approve'] ?? null)
             ->toBeTrue("resources.{$kind} must be auto-approved");
     }
@@ -120,4 +120,15 @@ it('documents the list → read → write iteration loop in the system prompt', 
     expect($prompt)->toContain('typst_resources(action: "templates", op: "read"');
     expect($prompt)->toContain("Don't write a `.typ` you haven't `read` first");
     expect($prompt)->toContain('auto-approved since v1.1.0');
+});
+
+it('documents the media-archive image import workflow in the system prompt', function (): void {
+    // Pin the section + action label so future rewrites don't
+    // collapse the bridge back into a sub-verb on `images`.
+    $expert = loadAgentTemplate('typst-expert.json');
+    $prompt = (string) ($expert['agent']['system_prompt'] ?? '');
+
+    expect($prompt)->toContain('## 5. Embed media-archive images');
+    expect($prompt)->toContain('action: "media_assets", op: "import"');
+    expect($prompt)->toContain('filesystem-relative');
 });

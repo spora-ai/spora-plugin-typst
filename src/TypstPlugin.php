@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst;
 
+use Closure;
 use Spora\Events\ContainerBuildingEvent;
 use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -18,8 +19,10 @@ use Spora\Plugins\Typst\Http\TypstPlaygroundSourceController;
 use Spora\Plugins\Typst\Http\TypstPreviewController;
 use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
+use Spora\Plugins\Typst\Services\TypstImageImporter;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
+use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -109,6 +112,14 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
             TypstPlaygroundSourceController::class => \DI\autowire(),
             TypstCompileTool::class                => \DI\autowire(),
             TypstResourcesTool::class              => \DI\autowire(),
+            TypstImageImporter::class              => \DI\autowire()
+                // Closure seam — keeps the plugin decoupled from the
+                // host's `final` MediaAssetReader (mirrors muse's
+                // MuseImageArchiveResolver); see
+                // {@see \Spora\Plugins\Typst\Services\TypstImageImporter::import()}.
+                ->constructorParameter('mediaAssetReader', \DI\factory(static function (MediaAssetReader $reader): Closure {
+                    return static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
+                })),
         ]);
 
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
