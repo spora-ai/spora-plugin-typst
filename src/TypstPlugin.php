@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst;
 
+use Closure;
 use Spora\Events\ContainerBuildingEvent;
 use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
@@ -20,6 +21,7 @@ use Spora\Plugins\Typst\Http\TypstTemplateController;
 use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
+use Spora\Services\MediaArchive\MediaAssetReader;
 use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
@@ -108,7 +110,24 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
             TypstPreviewController::class          => \DI\autowire(),
             TypstPlaygroundSourceController::class => \DI\autowire(),
             TypstCompileTool::class                => \DI\autowire(),
-            TypstResourcesTool::class              => \DI\autowire(),
+            TypstResourcesTool::class              => \DI\autowire()
+                // `op=import` reads Media Archive asset bytes through a
+                // closure the host injects — see
+                // {@see TypstResourcesTool::importImage()}. The plugin
+                // owns no direct dependency on the host's `final`
+                // `MediaAssetReader`; the closure is the seam, mirroring
+                // the muse plugin's `MuseImageArchiveResolver` pattern.
+                ->constructorParameter('mediaAssetReader', \DI\factory(static function (MediaAssetReader $reader): Closure {
+                    // Bridge to {@see MediaAssetReader::readAsset()}, the
+                    // host's ownership-union-checked read shape. The
+                    // plugin takes a closure rather than the concrete
+                    // `final` service so it stays decoupled (mirrors
+                    // muse's `MuseImageArchiveResolver` pattern). The
+                    // importer resolves the source filename via a
+                    // separate direct `MediaAsset::find()` call after
+                    // the ownership check passes here.
+                    return static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
+                })),
         ]);
 
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);

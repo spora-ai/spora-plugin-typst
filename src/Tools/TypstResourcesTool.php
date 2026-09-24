@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Spora\Plugins\Typst\Tools;
 
+use Closure;
+use Spora\Models\MediaAsset;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstResourceStore;
+use Spora\Plugins\Typst\Services\TypstWorldFactory;
 use Spora\Services\PrincipalContext;
 use Spora\Tools\Attributes\Tool;
 use Spora\Tools\Attributes\ToolOperation;
@@ -21,11 +24,13 @@ use Throwable;
  * kind is a separate `#[ToolOperation]`, so the LLM-facing schema
  * lists one row per kind instead of a single row with a kind verb.
  *
- * Per-op sub-action `op: list | write | delete | read` selects the verb.
- * For `list`, no extra params are needed. For `write`, `name` and
- * `content` are required (text bytes — for binary uploads use the
- * admin panel's typst/images endpoint instead). For `delete` and
- * `read`, only `name` is required.
+ * Per-op sub-action `op: list | write | delete | read | import`
+ * selects the verb. For `list`, no extra params are needed. For
+ * `write`, `name` and `content` are required (text bytes — for
+ * binary uploads use the admin panel's typst/images endpoint
+ * instead). For `delete` and `read`, only `name` is required.
+ * `import` (images only) bridges a Media Archive asset into the
+ * per-principal image library — see {@see importImage()}.
  *
  * `read` returns the resource's bytes so the LLM can iterate:
  * `list → read → modify → write → render` is the canonical edit
@@ -45,6 +50,18 @@ use Throwable;
  * rejects anything containing `/`, `\`, or shell metas before it
  * touches disk), and text payloads are capped at
  * {@see TypstResourceStore::MAX_BYTES}.
+ *
+ * The `mediaAssetReader` closure is an indirection into the host's
+ * {@see \Spora\Services\MediaArchive\MediaAssetReader::readAsset()};
+ * the plugin takes a closure rather than the concrete service so it
+ * stays decoupled from the `final` core class. The DI binding
+ * ({@see \Spora\Plugins\Typst\TypstPlugin::onContainerBuilding()})
+ * wraps the autowired reader. Tests construct an in-process reader
+ * via {@see \Spora\Services\DatabaseAssetStore} +
+ * {@see \Spora\Services\LocalAssetStore} and bind a closure that
+ * forwards to it. `null` means the `import` verb is unavailable —
+ * tool callers should pass a closure when the host has wired the
+ * reader; production never sees `null` because DI auto-injects.
  */
 #[Tool(
     name: 'typst_resources',
@@ -73,21 +90,21 @@ use Throwable;
 )]
 #[ToolOperation(
     name: 'images',
-    description: 'Manage per-principal Typst image resources. list: see visible images. write: upload a new image (text bytes — for binary uploads use the admin panel\'s typst/images endpoint instead). delete: remove a tier-2 image.',
+    description: 'Manage per-principal Typst image resources. list: see visible images. write: upload a new image (text bytes — for binary uploads use the admin panel\'s typst/images endpoint instead). read: fetch an image\'s bytes (base64). delete: remove a tier-2 image. import: copy a Media Archive asset into the principal\'s image library so a follow-up #image() can resolve it.',
     enabledByDefault: true,
     requiresApprovalByDefault: false,
 )]
 #[ToolParameter(
     name: 'op',
     type: 'string',
-    description: 'Sub-action: list (default) | write | delete.',
+    description: 'Sub-action: list (default) | write | delete | read | import.',
     required: false,
-    enum: ['list', 'write', 'delete'],
+    enum: ['list', 'write', 'delete', 'read', 'import'],
 )]
 #[ToolParameter(
     name: 'name',
     type: 'string',
-    description: 'Resource basename (required for write/delete; ignored for list). Allowed: A-Z a-z 0-9 . _ -',
+    description: 'Resource basename (required for write/delete/read; ignored for list; optional for import — falls back to the source asset\'s filename). Allowed: A-Z a-z 0-9 . _ -',
     required: false,
 )]
 #[ToolParameter(
@@ -96,9 +113,36 @@ use Throwable;
     description: 'UTF-8 file contents for op=write. For binary uploads, base64-encode and pre-decode here (the tool only handles text inline).',
     required: false,
 )]
+#[ToolParameter(
+    name: 'asset_id',
+    type: 'string',
+    description: 'Media Archive UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx, with optional .ext) for op=import. Required. The asset must be visible to the caller; mime must be in the image allowlist (image/png, image/jpeg, image/webp, image/svg+xml); byte size must be ≤ 5 MiB.',
+    required: false,
+)]
 final class TypstResourcesTool extends AbstractTypstTool
 {
     private const TOOL_PREFIX = 'typst_resources: ';
+
+    /**
+     * Closure signature mirrors
+     * {@see \Spora\Services\MediaArchive\MediaAssetReader::readAsset()}'s
+     * return shape, plus the source asset's `filename` so `import` can
+     * default the destination basename. `null` only when DI has not
+     * wired a reader (test paths that don't exercise `import`);
+     * production always injects a closure that forwards into the live
+     * core service plus one `MediaAsset::find()` for the filename.
+     *
+     * @var (Closure(string $id, ?int $userId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, filename?: ?string, sourceUrl?: string}|null)|null
+     */
+    private readonly ?Closure $mediaAssetReader;
+
+    public function __construct(
+        TypstWorldFactory $worldFactory,
+        ?Closure $mediaAssetReader = null,
+    ) {
+        parent::__construct($worldFactory);
+        $this->mediaAssetReader = $mediaAssetReader;
+    }
 
     public function execute(
         array $arguments,
@@ -110,9 +154,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         $action = $this->resolveAction($arguments);
         $op     = strtolower(trim((string) ($arguments['op'] ?? 'list')));
 
-        if (!in_array($op, ['list', 'write', 'delete', 'read'], true)) {
+        if (!in_array($op, ['list', 'write', 'delete', 'read', 'import'], true)) {
             return new ToolResult(false, sprintf(
-                'typst_resources: unknown op "%s" (expected: list, write, delete, read)',
+                'typst_resources: unknown op "%s" (expected: list, write, delete, read, import)',
                 $op,
             ));
         }
@@ -131,7 +175,9 @@ final class TypstResourcesTool extends AbstractTypstTool
             'fonts'     => $this->dispatchResource($paths, 'font', $op, $arguments),
             'templates' => $this->dispatchResource($paths, 'template', $op, $arguments),
             'examples'  => $this->dispatchResource($paths, 'example', $op, $arguments),
-            'images'    => $this->dispatchImage($paths, $op, $arguments),
+            'images'    => $op === 'import'
+                ? $this->importImage($paths, $arguments, $context, $userId)
+                : $this->dispatchImage($paths, $op, $arguments),
             default     => new ToolResult(false, sprintf(
                 'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images)',
                 $action,
@@ -143,8 +189,15 @@ final class TypstResourcesTool extends AbstractTypstTool
     {
         $action = $this->resolveAction($arguments);
         $op     = strtolower((string) ($arguments['op'] ?? 'list'));
-        $name   = (string) ($arguments['name'] ?? '');
-        return sprintf('Typst resources %s/%s%s', $action, $op, $name !== '' ? ':' . $name : '');
+        // For `images/op=import` the meaningful identifier is the
+        // Media Archive UUID, not `name` (which is the destination
+        // basename and may be absent). Truncate to 8 chars so the
+        // approval row stays narrow.
+        $tag = $op === 'import' && $action === 'images'
+            ? (string) ($arguments['asset_id'] ?? '')
+            : (string) ($arguments['name'] ?? '');
+        $tag = $tag !== '' ? $tag : (string) ($arguments['asset_id'] ?? '');
+        return sprintf('Typst resources %s/%s%s', $action, $op, $tag !== '' ? ':' . substr($tag, 0, 12) : '');
     }
 
     private function dispatchResource(TypstResourcePaths $paths, string $kind, string $op, array $arguments): ToolResult
@@ -401,6 +454,136 @@ final class TypstResourcesTool extends AbstractTypstTool
         return ToolResult::ok(
             content: sprintf('typst_resources: deleted image/%s', $name),
             data: ['name' => $name],
+        );
+    }
+
+    /**
+     * Copy a Media Archive asset into the principal's image library
+     * so a follow-up `#image("...")` call can resolve it.
+     *
+     * ext-typst treats every `#image()` path as filesystem-relative
+     * against the principal's `template_dir`, so `/api/v1/assets/<uuid>.<ext>`
+     * references resolve to `<storage>/typst/<principal>/api/v1/...`
+     * — which never exists. The image-library URL
+     * `/api/v1/typst/images/<basename>`, in contrast, points at a
+     * file we just wrote under that same `template_dir`. Importing
+     * is the bridge: read the bytes from the Media Archive (with
+     * the same ownership union `media.get_source` enforces), validate
+     * the mime + size, persist via {@see TypstImageStore::write()},
+     * and hand the LLM the URL to paste into `#image()`.
+     *
+     * `import` is `images`-only; it deliberately doesn't show up on
+     * `fonts` / `templates` / `examples` because Typst's only image
+     * reference form is `#image()`. External-mode assets (those the
+     * ingest pipeline kept by URL only because the body fetch failed)
+     * are rejected — there are no Spora-side bytes to copy.
+     *
+     * Runs the `MediaAssetReader` read through a closure the host
+     * injects (see {@see self::$mediaAssetReader}). The closure is
+     * `null` only in test harnesses that don't exercise `import`;
+     * production always has one because {@see \Spora\Plugins\Typst\TypstPlugin::onContainerBuilding()}
+     * binds the live core service.
+     */
+    private function importImage(
+        TypstResourcePaths $paths,
+        array $arguments,
+        ?PrincipalContext $context,
+        ?int $userId,
+    ): ToolResult {
+        $assetId = (string) ($arguments['asset_id'] ?? '');
+        if ($assetId === '') {
+            return new ToolResult(false, 'typst_resources: `asset_id` is required for op=import');
+        }
+        if (preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $assetId) !== 1) {
+            return new ToolResult(false, sprintf(
+                'typst_resources: invalid asset_id "%s" (expected 36-char UUID, optional .ext stripped)',
+                $assetId,
+            ));
+        }
+        if ($this->mediaAssetReader === null) {
+            return new ToolResult(false, 'typst_resources: import is not configured (MediaAssetReader not wired)');
+        }
+
+        $payload = ($this->mediaAssetReader)($assetId, $userId);
+        if ($payload === null) {
+            return new ToolResult(false, sprintf(
+                'typst_resources: media asset %s not found in the Media Archive, or not accessible to this caller',
+                $assetId,
+            ));
+        }
+        $status = (string) ($payload['status'] ?? '');
+        if ($status === 'external') {
+            return new ToolResult(false, sprintf(
+                'typst_resources: media asset %s is stored externally (storage_mode=external) and '
+                . 'has no Spora-side bytes; ask the source plugin to re-ingest with bytes, '
+                . 'or upload via the Images tab.',
+                $assetId,
+            ));
+        }
+
+        $mime  = strtolower(trim((string) ($payload['mime'] ?? '')));
+        $bytes = (string) ($payload['bytes'] ?? '');
+        if (!TypstImageStore::isAllowedMime($mime)) {
+            return new ToolResult(false, sprintf(
+                'typst_resources: media asset %s has mime "%s", which is not a supported image '
+                . '(allowed: image/png, image/jpeg, image/webp, image/svg+xml)',
+                $assetId,
+                $mime,
+            ));
+        }
+        if ($bytes === '') {
+            return new ToolResult(false, sprintf(
+                'typst_resources: media asset %s has zero readable bytes (storage_mode=%s)',
+                $assetId,
+                $status,
+            ));
+        }
+        if (strlen($bytes) > TypstImageStore::MAX_BYTES) {
+            return new ToolResult(false, sprintf(
+                'typst_resources: media asset %s (%d bytes) exceeds the %d-byte image cap; '
+                . 'reduce the asset (e.g. via media.create_derivative) or upload via the Images tab.',
+                $assetId,
+                strlen($bytes),
+                TypstImageStore::MAX_BYTES,
+            ));
+        }
+
+        $name = (string) ($arguments['name'] ?? '');
+        // Fall back to the source asset's filename when the caller
+        // didn't supply one. The closure already passed the
+        // ownership check via `MediaAssetReader::readAsset()` returning
+        // a payload; a single direct `MediaAsset::find()` per import
+        // gives the importer the original filename without forcing
+        // the closure signature to widen. Unsafe filenames flow
+        // through `TypstImageStore::write()`'s sanitiser.
+        if ($name === '') {
+            $source = MediaAsset::query()->find($assetId);
+            if ($source !== null && is_string($source->filename) && $source->filename !== '') {
+                $name = $source->filename;
+            }
+        }
+        try {
+            $row = (new TypstImageStore($paths))->write(
+                $bytes,
+                $mime,
+                $name !== '' ? $name : null,
+            );
+        } catch (Throwable $e) {
+            return new ToolResult(false, self::TOOL_PREFIX . $e->getMessage());
+        }
+
+        $url = '/api/v1/typst/images/' . rawurlencode($row['name']);
+        return ToolResult::ok(
+            sprintf('typst_resources: imported media asset %s as image/%s (%d bytes)', $assetId, $row['name'], $row['size']),
+            [
+                'asset_id'      => $assetId,
+                'name'          => $row['name'],
+                'url'           => $url,
+                'mime'          => $row['mime'],
+                'size'          => $row['size'],
+                'renamed'       => (bool) $row['renamed'],
+                'original_name' => $row['original_name'],
+            ],
         );
     }
 }

@@ -121,3 +121,17 @@ it('documents the list → read → write iteration loop in the system prompt', 
     expect($prompt)->toContain("Don't write a `.typ` you haven't `read` first");
     expect($prompt)->toContain('auto-approved since v1.1.0');
 });
+
+it('documents the media-archive image import workflow in the system prompt', function (): void {
+    // As of v1.3.0 the agent teaches itself the 3-step import recipe
+    // (image_muse → typst_resources(op: "import") → typst_compile) so
+    // it knows that #image(/api/v1/assets/<uuid>.<ext>) doesn't render
+    // directly. Pin the section header + the verb so future rewrites
+    // don't drop the bridge.
+    $expert = loadAgentTemplate('typst-expert.json');
+    $prompt = (string) ($expert['agent']['system_prompt'] ?? '');
+
+    expect($prompt)->toContain('## 5. Embed media-archive images');
+    expect($prompt)->toContain('op: "import"');
+    expect($prompt)->toContain('filesystem-relative');
+});

@@ -80,7 +80,7 @@ The plugin's test suite has two parts:
 | Tool | Operations | Notes |
 | --- | --- | --- |
 | `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval by default; the `typst-expert` agent template flips it auto-approved). The response's `data.source_id` is the parent `.typ` row (`media.get_source(source_id)` returns the bytes); `data.derivative_id` is the rendered bytes; `data.preview_id` (PDF only) is the first-page PNG sibling. `inspect` is a read-only error-only pass (auto-approved). |
-| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. Read-only ops are auto-approved; `write` and `delete` require approval. |
+| `typst_resources` | `fonts` / `templates` / `examples` / `images` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read`, plus `import` for `images`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. `images: import` copies a Media Archive asset into the principal's image library so a follow-up `#image()` can resolve it (Media Archive URLs themselves don't work in `#image()` — ext-typst treats paths as filesystem-relative). Read-only ops are auto-approved; `write` and `delete` require approval. |
 
 `typst_compile` accepts the source as either:
 
@@ -221,25 +221,54 @@ in the caller's own media pool.
 
 ### URL convention
 
-The asset_url returned by both the compile endpoint and the image
-library is the canonical media-archive URL `/api/v1/assets/<uuid>.<ext>`.
-In Typst source, reference it directly via `#image()`:
+The plugin's image library exposes `/api/v1/typst/images/<basename>` —
+the only URL ext-typst's `#image()` accepts. Reference it directly in
+Typst source:
 
 ```typst
-#image("/api/v1/assets/01HXYZ....png", width: 80%)
+#image("/api/v1/typst/images/logo.png", width: 80%)
 ```
 
-The production SPA serves these URLs from core's `AssetController` (no
-plugin-specific route is needed), so the same URL works inside Typst
-source, in chat markdown, and in the admin gallery.
+The render's *output* row carries the canonical media-archive URL
+`/api/v1/assets/<uuid>.<ext>` — that one is served by core's
+`AssetController`. The two URL surfaces are deliberately distinct:
+plugin inputs (templates / examples / fonts / image inputs) are
+filesystem-local; only rendered outputs flow through the media archive.
+
+For an image that lives in the operator's media archive (e.g. an
+`image_muse` output), `/api/v1/assets/<uuid>.<ext>` does **not** work
+in `#image()` — ext-typst resolves those paths relative to the
+principal's filesystem root. Import the asset first:
+
+```jsonc
+// step 1 — generate / discover
+image_muse(prompt: "…")                                   → /api/v1/assets/<uuid>.webp
+// step 2 — copy into the principal's image library
+typst_resources(action: "images", op: "import",
+                asset_id: "<uuid>",
+                name: "autumn-mountain-landscape.webp")
+                                                          → /api/v1/typst/images/autumn-mountain-landscape.webp
+// step 3 — render with the local URL
+typst_compile(action: "render",
+              source: "#image(\"/api/v1/typst/images/autumn-mountain-landscape.webp\", width: 80%)",
+              format: "pdf")
+```
+
+The plugin production SPA serves the `/api/v1/typst/images/<basename>`
+URL via `TypstImageController::show()` (the chat-UI `<img>` consumes
+it the same way), and the canonical `/api/v1/assets/<uuid>.<ext>` URL
+via core's `AssetController` — so the same image works in both
+contexts.
 
 ### Architectural distinction
 
-Fonts and examples are plugin-private files (raw bytes, no `media_assets`
-row, no canonical asset URL). Images are full `media_assets` rows with a
-canonical `/api/v1/assets/<uuid>.<ext>` URL the chat UI can resolve.
-That difference is why fonts/examples use a basename-keyed storage path
-while images use the `media_assets.id` UUID as the addressable key.
+Fonts, templates, examples, and image inputs are plugin-private files
+(raw bytes on disk, no `media_assets` row, no canonical asset URL).
+Rendered Typst outputs (PDF / PNG / SVG) flow through
+`MediaDerivativeService` so the chat's `MediaEmbed` markdown and the
+media-archive gallery surface them. Per the architecture decision in
+the PR that introduced the image-library refactor: inputs on the
+filesystem, outputs in the media archive.
 
 ## Local development
 
