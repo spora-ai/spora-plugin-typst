@@ -1,11 +1,11 @@
 ---
 name: typst
 description: "When the user asks for a typeset document, a PDF report, a slide deck, a structured invoice or any other printed artifact rendered from a programmatic source; OR when a workspace task produces structured data (a bill of materials, a meeting summary, a chart of accounts) that the user wants in a presentable form. Use the `typst_compile` tool to compile Typst source to PDF/PNG/SVG (action=render) or run an error-only pre-check (action=inspect), and `typst_resources` to manage the per-principal font, template, example, and image libraries. Recommended tools: typst_compile, typst_resources."
-license: Apache-2.0
+license: MIT
 metadata:
   author: spora-ai
   version: "1.5"
-  allowedByDefault: false
+  allowedByDefault: "false"
   requiresTools: "typst_compile,typst_resources"
 ---
 
