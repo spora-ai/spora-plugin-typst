@@ -14,9 +14,8 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 - Tier-1 fonts (Inter OFL + DejaVu Sans/Mono/Serif + Latin Modern Math) shipped under `skills/typst/fonts/` — always available without an upload.
 - 1 starter template (`skills/typst/templates/report.typ`) + 1 example (`skills/typst/examples/showcase.typ`).
 - A `TypstRenderProducer` that registers with `MediaDerivativeProducerDiscovery`
-  so any admin surface can dispatch into it.
-- A `TypstSourcePassthroughConverter` registered with `MediaConverterDiscovery`
-  so `.typ` uploads are accepted (`text/x-typst` is added to the plugin-supplied allowlist).
+  so any admin surface can dispatch into it. It also keeps `.typ` uploads accepted —
+  `text/x-typst` is contributed to the upload allowlist through the producer registry.
 
 ## Architectural rule — **works without spora-plugin-media-archive**
 
