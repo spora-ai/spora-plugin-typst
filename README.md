@@ -14,14 +14,8 @@ Spora agent conversation. Backed by [ext-typst](https://ext-typst.carthage.softw
 - Tier-1 fonts (Inter OFL + DejaVu Sans/Mono/Serif + Latin Modern Math) shipped under `skills/typst/fonts/` — always available without an upload.
 - 1 starter template (`skills/typst/templates/report.typ`) + 1 example (`skills/typst/examples/showcase.typ`).
 - A `TypstRenderProducer` that registers with `MediaDerivativeProducerDiscovery`
-  so any admin surface can dispatch into it. It is also what keeps `.typ`
-  uploads accepted — `text/x-typst` is contributed to the upload allowlist
-  through the producer registry. That union reaches
-  `MediaAllowedTypesService::allowedMimeTypes()` only from core's
-  md-derivative cut onwards; on an older core the entry came from the
-  converter registry, which that cut deletes along with this plugin's
-  converter. The two changes must land together — separated, the plugin
-  boots fine and every `.typ` upload is a 415 at the gate.
+  so any admin surface can dispatch into it, and keeps `.typ` uploads accepted
+  (`text/x-typst` reaches the upload allowlist through the producer registry).
 
 ## Architectural rule — **works without spora-plugin-media-archive**
 

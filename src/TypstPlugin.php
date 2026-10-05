@@ -92,22 +92,14 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
      * register the `TypstRenderProducer` with the media-derivatives
      * discovery registry.
      *
-     * The producer is also what keeps `text/x-typst` on the upload
-     * allowlist, because core's `MediaAllowedTypesService` unions every
-     * registered producer's `supportedSourceFormats()` into
-     * `allowedMimeTypes()` — and `isAllowed()` matches that list by exact
-     * string, so no `text/*` prefix rule stands in for the entry.
+     * Load-bearing, not decorative: core's `MediaAllowedTypesService` unions
+     * every producer's `supportedSourceFormats()` into the upload allowlist
+     * and `isAllowed()` matches by exact string, so dropping this makes
+     * `.typ` uploads 415. Core documents the union on that class.
      *
-     * **That union arrives with core's md-derivative cut, not before.**
-     * On a core that predates it the same allowlist entry is fed by the
-     * *converter* registry, which core's cut deletes and this plugin no
-     * longer writes to — so the two have to land together. Separated, the
-     * plugin still boots, and every `.typ` upload is a 415 at the gate.
-     *
-     * Discovery calls run on every boot by design — the registry is an
-     * in-process static that resets between tests, and the discovery
-     * class no-ops when the FQCN is already registered, so repeated
-     * registration is harmless.
+     * Discovery runs on every boot by design — the registry is an
+     * in-process static that resets between tests, and `add()` no-ops when
+     * the FQCN is already registered.
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
