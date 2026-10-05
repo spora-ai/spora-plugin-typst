@@ -93,9 +93,16 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
      * discovery registry.
      *
      * The producer is also what keeps `text/x-typst` on the upload
-     * allowlist: core's `MediaAllowedTypesService` unions every
+     * allowlist, because core's `MediaAllowedTypesService` unions every
      * registered producer's `supportedSourceFormats()` into
-     * `allowedMimeTypes()`.
+     * `allowedMimeTypes()` — and `isAllowed()` matches that list by exact
+     * string, so no `text/*` prefix rule stands in for the entry.
+     *
+     * **That union arrives with core's md-derivative cut, not before.**
+     * On a core that predates it the same allowlist entry is fed by the
+     * *converter* registry, which core's cut deletes and this plugin no
+     * longer writes to — so the two have to land together. Separated, the
+     * plugin still boots, and every `.typ` upload is a 415 at the gate.
      *
      * Discovery calls run on every boot by design — the registry is an
      * in-process static that resets between tests, and the discovery
