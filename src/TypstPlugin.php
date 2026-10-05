@@ -30,42 +30,31 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 /**
  * Plugin entry point for `spora-plugin-typst`.
  *
- * Contributes one admin app (TypstApp), two LLM-callable tools
- * (`typst_compile`, `typst_resources`), the REST routes under
- * `/api/v1/typst/{fonts,templates,examples,images,compile,sources}*`,
- * the `TypstRenderProducer` (registered with the media-derivatives
- * discovery registry), DI bindings for the controllers and tools, the
- * `skills/typst/` directory (Inter OFL fonts + a starter invoice
- * template + a headings example), and the `typst-assistant` agent
- * template.
+ * Ships `skills/typst/` — Inter and Latin Modern Math under OFL, the
+ * DejaVu families under Bitstream Vera / Arev — plus the `typst-expert`
+ * agent template. The two tools, the admin app, the `/api/v1/typst/*`
+ * routes and the media-derivatives producer are wired in the two event
+ * handlers below.
  *
  * Architectural invariants:
  *
  *   - **Inputs on the filesystem, outputs in the media archive.**
- *     Fonts, templates, examples, and images live as plain files in
- *     `<storage>/typst/<principal>/{fonts,templates,examples,images}/`.
- *     They do NOT pollute the media archive. Only the rendered Typst
- *     OUTPUTS (PDF/PNG/SVG) flow through `MediaDerivativeService` →
- *     `media_assets` → the chat's `MediaEmbed` markdown — mirroring
- *     how a chat tool's outputs naturally belong in the media
- *     library while its input material does not.
+ *     Fonts, templates and examples are plain files under
+ *     `<storage>/typst/<principal>/{fonts,templates,examples}/`;
+ *     images sit at the principal root so `#image("basename.jpg")`
+ *     resolves against the same `template_dir` (see
+ *     `TypstResourcePaths`). Only rendered output — PDF/PNG/SVG —
+ *     reaches `MediaDerivativeService` → `media_assets` → `MediaEmbed`.
  *
  *   - **No dependency on `spora-plugin-media-archive`.** Inputs are
- *     served via the plugin's own `/api/v1/typst/{fonts,templates,
- *     examples,images}/*` routes; outputs go through core's
- *     `MediaDerivativeService::create()` and surface via core's
- *     `/api/v1/assets/<uuid>.<ext>`. No HTTP hop into Media
- *     Archive routes.
+ *     served by the plugin's own `/api/v1/typst/*` routes; outputs go
+ *     through core's `MediaDerivativeService` and surface via core's
+ *     `/api/v1/assets/<uuid>.<ext>`.
  *
- *   - **Typst world is principal-scoped.** The factory sets
- *     `template_dir` to `<storage>/typst/<principal>/` and
- *     `font_dirs` to `[<plugin>/skills/typst/fonts/, <storage>/typst/
- *     fonts/<principal>/]`. Skill-shipped templates live at the
- *     parallel `<plugin>/skills/typst/{templates,examples}/` paths
- *     and are surfaced in the admin UI as a separate listing; the
- *     per-principal `template_dir` deliberately does NOT include
- *     them, so the operator can shadow a skill-shipped file by
- *     uploading one of the same name under their principal.
+ *   - **Typst world is principal-scoped.** The per-principal
+ *     `template_dir` deliberately excludes the bundled
+ *     `skills/typst/{templates,examples}/`, so an operator can shadow a
+ *     bundled file by uploading one of the same name.
  */
 final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterface
 {
