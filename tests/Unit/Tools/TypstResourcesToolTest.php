@@ -116,7 +116,6 @@ describe('kind discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'bogus', 'op' => 'list'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -128,7 +127,6 @@ describe('kind discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'wipe'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -140,7 +138,6 @@ describe('kind discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'images', 'op' => 'import'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -150,7 +147,6 @@ describe('kind discriminator', function (): void {
         $mirror = $this->tool->execute(
             ['action' => 'media_assets', 'op' => 'list', 'asset_id' => '00000000-0000-4000-8000-000000000000'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($mirror->success)->toBeFalse();
@@ -163,7 +159,6 @@ describe('fonts/templates/examples dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'write', 'name' => 'Acme.otf', 'content' => 'OTF-BYTES'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -172,7 +167,6 @@ describe('fonts/templates/examples dispatch', function (): void {
         $listResult = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'list'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($listResult->success)->toBeTrue();
@@ -184,7 +178,6 @@ describe('fonts/templates/examples dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'templates', 'op' => 'write', 'content' => 'hello'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -195,7 +188,6 @@ describe('fonts/templates/examples dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'examples', 'op' => 'write', 'name' => 'x.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -206,7 +198,6 @@ describe('fonts/templates/examples dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'delete'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -217,14 +208,12 @@ describe('fonts/templates/examples dispatch', function (): void {
         $this->tool->execute(
             ['action' => 'fonts', 'op' => 'write', 'name' => 'doomed.otf', 'content' => 'OTF'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $result = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'delete', 'name' => 'doomed.otf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -237,7 +226,6 @@ describe('images dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'images', 'op' => 'write', 'name' => 'logo.bin', 'content' => 'BIN'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -248,7 +236,6 @@ describe('images dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'images', 'op' => 'write', 'name' => 'logo.png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -259,7 +246,6 @@ describe('images dispatch', function (): void {
         $result = $this->tool->execute(
             ['action' => 'images', 'op' => 'delete'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -298,14 +284,12 @@ describe('principal scope propagation', function (): void {
         $this->tool->execute(
             ['action' => 'fonts', 'op' => 'write', 'name' => 'private-A.otf', 'content' => 'A-BYTES'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $principalBList = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'list'],
             agentId: 0,
-            userId: $userIdB,
             context: $contextB,
         );
         expect($principalBList->success)->toBeTrue();
@@ -314,7 +298,6 @@ describe('principal scope propagation', function (): void {
         $principalAList = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'list'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($principalAList->content)->toContain('private-A.otf');
@@ -329,7 +312,6 @@ describe('principal scope propagation', function (): void {
         expect(fn() => $this->tool->execute(
             ['action' => 'fonts', 'op' => 'list'],
             agentId: 0,
-            userId: $this->userId,
             context: null,
         ))->toThrow(TypstRuntimeException::class);
     });
@@ -341,14 +323,12 @@ describe('op: read (list → read → modify → write → render iteration loop
         $this->tool->execute(
             ['action' => 'templates', 'op' => 'write', 'name' => 'teaser.typ', 'content' => $payload],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $result = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read', 'name' => 'teaser.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -367,14 +347,12 @@ describe('op: read (list → read → modify → write → render iteration loop
         $this->tool->execute(
             ['action' => 'examples', 'op' => 'write', 'name' => 'hello.typ', 'content' => $payload],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $result = $this->tool->execute(
             ['action' => 'examples', 'op' => 'read', 'name' => 'hello.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -390,14 +368,12 @@ describe('op: read (list → read → modify → write → render iteration loop
         $this->tool->execute(
             ['action' => 'fonts', 'op' => 'write', 'name' => 'Acme.otf', 'content' => $bytes],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $result = $this->tool->execute(
             ['action' => 'fonts', 'op' => 'read', 'name' => 'Acme.otf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -411,7 +387,6 @@ describe('op: read (list → read → modify → write → render iteration loop
         $result = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read', 'name' => 'ghost.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -425,7 +400,6 @@ describe('op: read (list → read → modify → write → render iteration loop
         $result = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -448,14 +422,12 @@ describe('op: read (list → read → modify → write → render iteration loop
         $this->tool->execute(
             ['action' => 'templates', 'op' => 'write', 'name' => 'private-A.typ', 'content' => 'PRIVATE'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
         $principalBRead = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read', 'name' => 'private-A.typ'],
             agentId: 0,
-            userId: $userIdB,
             context: $contextB,
         );
         expect($principalBRead->success)->toBeFalse();
@@ -464,7 +436,6 @@ describe('op: read (list → read → modify → write → render iteration loop
         $principalARead = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read', 'name' => 'private-A.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($principalARead->success)->toBeTrue();
@@ -479,7 +450,6 @@ describe('op: read (list → read → modify → write → render iteration loop
         $result = $this->tool->execute(
             ['action' => 'templates', 'op' => 'read', 'name' => 'evil/../escape'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -492,7 +462,6 @@ describe('op: read (images)', function (): void {
         $read = $this->tool->execute(
             ['action' => 'images', 'op' => 'read'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($read->success)->toBeFalse();
@@ -503,7 +472,6 @@ describe('op: read (images)', function (): void {
         $read = $this->tool->execute(
             ['action' => 'images', 'op' => 'read', 'name' => 'ghost.png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($read->success)->toBeFalse();
@@ -515,7 +483,6 @@ describe('op: read (images)', function (): void {
         $read = $this->tool->execute(
             ['action' => 'images', 'op' => 'read', 'name' => 'evil/../escape'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($read->success)->toBeFalse();
@@ -532,7 +499,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'autumn.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -560,7 +526,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'winter.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -579,7 +544,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $firstImport = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetIdA, 'name' => 'shared.png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($firstImport->success)->toBeTrue();
@@ -587,7 +551,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $secondImport = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetIdB, 'name' => 'shared.png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($secondImport->success)->toBeTrue();
@@ -601,7 +564,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -614,7 +576,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => 'not-a-uuid'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -633,7 +594,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId . '.webp', 'name' => 'a.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -649,7 +609,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'private.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -663,7 +622,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => '00000000-0000-4000-8000-000000000000', 'name' => 'ghost.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -677,7 +635,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'external.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -693,7 +650,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'song.mp3'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -710,7 +666,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'huge.png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -725,7 +680,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -740,7 +694,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $tool->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'My Image (1).webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -758,7 +711,6 @@ describe('op: import (Media Archive → image library bridge)', function (): voi
         $result = $unwired->execute(
             ['action' => 'media_assets', 'op' => 'import', 'asset_id' => $assetId, 'name' => 'a.webp'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();

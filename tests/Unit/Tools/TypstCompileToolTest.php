@@ -160,7 +160,6 @@ describe('action discriminator', function (): void {
         $result = $this->tool->execute(
             ['source' => '= Hi', 'filename' => 'hi.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -172,7 +171,6 @@ describe('action discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => 'hi.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->content)->toContain('TypstRenderProducer is not registered');
@@ -182,7 +180,6 @@ describe('action discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'inspect', 'source' => '= Hi'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         // The inspect path runs the real Inspector (ext-typst). On
@@ -199,7 +196,6 @@ describe('action discriminator', function (): void {
         $result = $this->tool->execute(
             ['action' => 'bogus', 'source' => '= Hi'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -213,7 +209,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'format' => 'docx'],
             agentId: 0,
-            userId: null,
         );
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('invalid format');
@@ -221,13 +216,13 @@ describe('render path', function (): void {
     });
 
     it('returns a failed ToolResult when neither source nor file is provided', function () {
-        $result = $this->tool->execute(['action' => 'render'], agentId: 0, userId: null);
+        $result = $this->tool->execute(['action' => 'render'], agentId: 0);
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('either `source`');
     });
 
     it('returns a failed ToolResult when the file points to a missing asset', function () {
-        $result = $this->tool->execute(['action' => 'render', 'file' => 'no-such-asset'], agentId: 0, userId: null);
+        $result = $this->tool->execute(['action' => 'render', 'file' => 'no-such-asset'], agentId: 0);
         expect($result->success)->toBeFalse();
         expect($result->content)->toContain('file "no-such-asset" not found');
         expect($result->content)->toContain('checked media_assets by UUID, then templates/ and examples/');
@@ -239,7 +234,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => 'hi.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -252,7 +246,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -268,7 +261,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => '', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -280,7 +272,6 @@ describe('render path', function (): void {
         $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -312,7 +303,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => 'hi.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -326,7 +316,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => 'hi.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -362,7 +351,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hi', 'filename' => 'hi.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -411,7 +399,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'file' => $asset->id, 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: null,
         );
 
@@ -441,7 +428,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'file' => $asset->id, 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -471,7 +457,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'file' => $asset->id, 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -491,7 +476,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= Hello', 'filename' => 'hello.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -523,7 +507,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= PNG', 'filename' => 'cover.typ', 'format' => 'png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -554,7 +537,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => "= Invoice\n", 'filename' => 'invoice.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -589,7 +571,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => "= Hello\n", 'filename' => 'data-channels.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -653,7 +634,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'source' => '= PNG', 'filename' => 'no-preview.typ', 'format' => 'png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -694,7 +674,6 @@ describe('render path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'render', 'file' => $parent->id, 'filename' => 'ignored.typ', 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -714,7 +693,6 @@ describe('inspect path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'inspect'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -755,7 +733,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => "= Hello\n"],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -796,7 +773,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => "= Hi\n", 'filename' => 'inspect-letter.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -811,7 +787,6 @@ describe('inspect path', function (): void {
         $result = $this->tool->execute(
             ['action' => 'inspect', 'file' => 'no-such-asset'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -860,7 +835,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => '= Hello'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -899,7 +873,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => "= Hello\n"],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -965,7 +938,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => "#include \"does-not-exist.typ\"\n"],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -989,7 +961,6 @@ describe('inspect path', function (): void {
         $result = $tool->execute(
             ['action' => 'inspect', 'source' => "= Hi\n"],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -1031,7 +1002,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'inspect', 'file' => $basename, 'format' => 'png'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
@@ -1050,7 +1020,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'inspect', 'file' => $basename],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -1066,7 +1035,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'inspect', 'file' => $basename],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -1076,7 +1044,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'inspect', 'file' => 'no-such-file-anywhere.typ'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeFalse();
@@ -1089,7 +1056,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'inspect', 'source' => "= Hi\n", 'file' => ''],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
         expect($result->success)->toBeTrue();
@@ -1110,7 +1076,6 @@ describe('typst_compile.file is polymorphic (UUID OR basename)', function (): vo
         $result = $this->tool->execute(
             ['action' => 'render', 'file' => $basename, 'format' => 'pdf'],
             agentId: 0,
-            userId: $this->userId,
             context: $this->context,
         );
 
