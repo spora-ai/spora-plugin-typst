@@ -117,6 +117,9 @@ final class TypstCompileTool extends AbstractTypstTool
         parent::__construct($worldFactory);
     }
 
+    /**
+     * @deprecated 1.0 pass $context->ownerUserId instead; removed from the interface in core 0.30.0.
+     */
     public function execute(
         array $arguments,
         int $agentId,
@@ -124,11 +127,12 @@ final class TypstCompileTool extends AbstractTypstTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $action = $this->resolveAction($arguments);
+        $ownerId = $context?->ownerUserId;
+        $action  = $this->resolveAction($arguments);
 
         return match ($action) {
-            'inspect' => $this->inspectSource($arguments, $userId, $context),
-            'render', '' => $this->renderSource($arguments, $agentId, $userId, $context),
+            'inspect' => $this->inspectSource($arguments, $ownerId, $context),
+            'render', '' => $this->renderSource($arguments, $agentId, $ownerId, $context),
             default    => new ToolResult(false, sprintf(
                 'typst_compile: unknown action "%s" (expected: render | inspect)',
                 $action,
