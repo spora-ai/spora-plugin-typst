@@ -38,7 +38,7 @@ use Throwable;
  * from tier-2 to tier-1 — so the LLM can fetch the bundled baseline
  * before overwriting it.
  *
- * The plugin-shipped tier-1 resources (Inter OFL fonts, the report
+ * The plugin-shipped tier-1 resources (the bundled fonts, the report
  * template, the showcase example) are visible to `list` and `read`
  * but cannot be `delete`d — deletion is rejected for tier-1 rows by
  * {@see TypstResourceStore::delete()} and {@see TypstImageStore::delete()}.

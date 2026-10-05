@@ -47,7 +47,7 @@ final class TypstFontController
      * preserves the caller's own-principal default for backward
      * compatibility with the v1 clients.
      *
-     * Skill-shipped fonts (tier-1, plugin-bundled Inter OFL) are
+     * Skill-shipped fonts (tier-1, plugin-bundled) are
      * always included regardless of the requested principal — the
      * `TypstResourceStore::list()` union already mixes tier-1 and
      * tier-2 (deduplicated, tier-2 wins on basename collision).

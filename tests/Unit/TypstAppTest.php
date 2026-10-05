@@ -4,27 +4,13 @@ declare(strict_types=1);
 
 use Spora\Plugins\Typst\TypstApp;
 
-it('returns a raw SVG path for its icon (avoids the host puzzle fallback)', function () {
-    $app = new TypstApp();
-
-    // The host's <Icon> component falls back to the puzzle
-    // glyph for any name it doesn't know. Ship a raw `d`
-    // string instead so the host's "starts with a path
-    // command letter" branch fires and renders the
-    // typographic paragraph mark (¶) without a Spora
-    // frontend coordination round-trip.
-    expect($app->icon())->toStartWith('M');
-});
-
-it('uses Lucide Pilcrow path data so the paragraph mark renders correctly', function () {
-    $app = new TypstApp();
-    $path = $app->icon();
-
-    // Three subpaths: two vertical stems (M13 v16, M17 v16) and
-    // the typographic bowl (H9.5a4.5 4.5 0 0 0 0 9H13). Without
-    // the bowl subpath the icon would render as two parallel
-    // vertical strokes instead of the ¶.
-    expect($path)->toContain('M13 4v16')
-        ->and($path)->toContain('M17 4v16')
-        ->and($path)->toContain('a4.5 4.5 0 0 0 0 9');
+it('returns a bundled icon name rather than raw SVG path data', function () {
+    // The host's <Icon> resolves names against its bundled registry
+    // and falls back to `puzzle` for anything it doesn't know. Raw
+    // `d` data is only honoured when it starts with `M<digit>` or
+    // `m<-?digit>`, so the registry name is the durable option. No
+    // test here can observe a host-side registry drop — pinning the
+    // name is what surfaces that as a diff here instead of a silent
+    // puzzle glyph in the admin UI.
+    expect((new TypstApp())->icon())->toBe('pilcrow');
 });

@@ -31,24 +31,29 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  * Plugin entry point for `spora-plugin-typst`.
  *
  * Contributes one admin app (TypstApp), two LLM-callable tools
- * (`typst_compile`, `typst_resources`), the REST routes under
- * `/api/v1/typst/{fonts,templates,examples,images,compile,sources}*`,
- * the `TypstRenderProducer` (registered with the media-derivatives
- * discovery registry), DI bindings for the controllers and tools, the
- * `skills/typst/` directory (Inter OFL fonts + a starter invoice
- * template + a headings example), and the `typst-assistant` agent
- * template.
+ * (`typst_compile`, `typst_resources`), the 25 REST routes under
+ * `/api/v1/typst/{fonts,templates,examples,images,compile,preview,
+ * sources}*`, the `TypstRenderProducer` (registered with the
+ * media-derivatives discovery registry), DI bindings for the
+ * controllers and tools, the `skills/typst/` directory (Inter +
+ * Latin Modern Math under OFL, the DejaVu families under Bitstream
+ * Vera / Arev, plus `templates/report.typ` and
+ * `examples/showcase.typ`), and the `typst-expert` agent template.
  *
  * Architectural invariants:
  *
  *   - **Inputs on the filesystem, outputs in the media archive.**
- *     Fonts, templates, examples, and images live as plain files in
- *     `<storage>/typst/<principal>/{fonts,templates,examples,images}/`.
- *     They do NOT pollute the media archive. Only the rendered Typst
- *     OUTPUTS (PDF/PNG/SVG) flow through `MediaDerivativeService` →
- *     `media_assets` → the chat's `MediaEmbed` markdown — mirroring
- *     how a chat tool's outputs naturally belong in the media
- *     library while its input material does not.
+ *     Fonts, templates, and examples live as plain files in
+ *     `<storage>/typst/<principal>/{fonts,templates,examples}/`;
+ *     images sit at the principal root itself, so that
+ *     `#image("basename.jpg")` resolves against the same
+ *     `template_dir` (see `TypstResourcePaths` for the rationale).
+ *     None of them pollute the media archive. Only the rendered
+ *     Typst OUTPUTS (PDF/PNG/SVG) flow through
+ *     `MediaDerivativeService` → `media_assets` → the chat's
+ *     `MediaEmbed` markdown — mirroring how a chat tool's outputs
+ *     naturally belong in the media library while its input
+ *     material does not.
  *
  *   - **No dependency on `spora-plugin-media-archive`.** Inputs are
  *     served via the plugin's own `/api/v1/typst/{fonts,templates,
@@ -60,7 +65,7 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
  *   - **Typst world is principal-scoped.** The factory sets
  *     `template_dir` to `<storage>/typst/<principal>/` and
  *     `font_dirs` to `[<plugin>/skills/typst/fonts/, <storage>/typst/
- *     fonts/<principal>/]`. Skill-shipped templates live at the
+ *     <principal>/fonts/]`. Skill-shipped templates live at the
  *     parallel `<plugin>/skills/typst/{templates,examples}/` paths
  *     and are surfaced in the admin UI as a separate listing; the
  *     per-principal `template_dir` deliberately does NOT include

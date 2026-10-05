@@ -37,8 +37,8 @@ use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
  * `template` and `example` look the same to Typst — both are
  * `.typ` files referenced via `#include`. The distinction is purely
  * navigational: `template` is for end-user document skeletons
- * (invoice.typ, letter.typ), `example` is for pattern snippets the
- * LLM reads to learn a primitive (headings.typ, table.typ).
+ * (`report.typ`), `example` is for pattern snippets the LLM reads to
+ * learn a primitive (`showcase.typ`).
  *
  * Tier 1 (skill-shipped) is the canonical, versioned set that ships
  * with the plugin. Tier 2 (per-principal) is operator-uploaded and
