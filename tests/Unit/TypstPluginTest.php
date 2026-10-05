@@ -7,7 +7,6 @@ use Spora\Events\ContainerBuildingEvent;
 use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
-use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
@@ -19,7 +18,6 @@ use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Plugins\Typst\TypstApp;
 use Spora\Plugins\Typst\TypstPlugin;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Symfony\Component\EventDispatcher\EventDispatcher;
 
@@ -36,7 +34,6 @@ use Symfony\Component\EventDispatcher\EventDispatcher;
  */
 beforeEach(function () {
     MediaDerivativeProducerDiscovery::reset();
-    MediaConverterDiscovery::reset();
 
     $this->plugin     = new TypstPlugin();
     $this->dispatcher = new EventDispatcher();
@@ -45,7 +42,6 @@ beforeEach(function () {
 
 afterEach(function () {
     MediaDerivativeProducerDiscovery::reset();
-    MediaConverterDiscovery::reset();
 });
 
 it('reports the spora-plugin-typst name from the registered TypstApp', function () {
@@ -64,15 +60,6 @@ it('registers TypstRenderProducer with the media-derivatives discovery on contai
     $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
 
     expect(MediaDerivativeProducerDiscovery::all())->toContain(TypstRenderProducer::class);
-});
-
-it('registers TypstSourcePassthroughConverter with the media-converter discovery on container build', function () {
-    // `text/x-typst` isn't in core's TEXT_MIME_TYPES — without this
-    // registration `.typ` uploads fail with 415.
-    $builder = new DI\ContainerBuilder();
-    $this->dispatcher->dispatch(new ContainerBuildingEvent($builder));
-
-    expect(MediaConverterDiscovery::all())->toContain(TypstSourcePassthroughConverter::class);
 });
 
 it('registers every controller and tool FQCN as a PHP-DI autowire definition', function () {

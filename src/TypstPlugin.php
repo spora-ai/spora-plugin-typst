@@ -10,7 +10,6 @@ use Spora\Events\RoutesRegisteringEvent;
 use Spora\Http\Middleware\AuthMiddleware;
 use Spora\Http\Middleware\CsrfMiddleware;
 use Spora\Plugins\AbstractPlugin;
-use Spora\Plugins\Typst\Converters\TypstSourcePassthroughConverter;
 use Spora\Plugins\Typst\Http\TypstCompileController;
 use Spora\Plugins\Typst\Http\TypstExampleController;
 use Spora\Plugins\Typst\Http\TypstFontController;
@@ -23,7 +22,6 @@ use Spora\Plugins\Typst\Services\TypstImageImporter;
 use Spora\Plugins\Typst\Tools\TypstCompileTool;
 use Spora\Plugins\Typst\Tools\TypstResourcesTool;
 use Spora\Services\MediaArchive\MediaAssetReader;
-use Spora\Services\MediaArchive\MediaConverterDiscovery;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 
@@ -80,14 +78,17 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
 
     /**
      * Wire DI bindings for the controllers + tools, and (idempotently)
-     * register the `TypstRenderProducer` and
-     * `TypstSourcePassthroughConverter` with the media discovery
-     * registries.
+     * register the `TypstRenderProducer` with the media-derivatives
+     * discovery registry.
      *
-     * Discovery calls run on every boot by design — the registries are
-     * in-process statics that reset between tests, and the discovery
-     * classes no-op when the FQCN is already registered, so repeated
-     * registration is harmless.
+     * Load-bearing, not decorative: core's `MediaAllowedTypesService` unions
+     * every producer's `supportedSourceFormats()` into the upload allowlist
+     * and `isAllowed()` matches by exact string, so dropping this makes
+     * `.typ` uploads 415. Core documents the union on that class.
+     *
+     * Discovery runs on every boot by design — the registry is an
+     * in-process static that resets between tests, and `add()` no-ops when
+     * the FQCN is already registered.
      */
     public function onContainerBuilding(ContainerBuildingEvent $event): void
     {
@@ -112,7 +113,6 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
         ]);
 
         MediaDerivativeProducerDiscovery::add(TypstRenderProducer::class);
-        MediaConverterDiscovery::add(TypstSourcePassthroughConverter::class);
     }
 
     /**
