@@ -267,7 +267,7 @@ abstract class AbstractTypstTool extends AbstractTool
             return false;
         }
         $principalId = $context->principalId;
-        $ownerUserId = $context->ownerUserId ?? $userId;
+        $ownerUserId = $context->ownerUserId;
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
@@ -340,7 +340,7 @@ abstract class AbstractTypstTool extends AbstractTool
     ): MediaAsset {
         $id = $this->generateUuid();
         $principalId = $context !== null ? $context->principalId : 0;
-        $ownerUserId = $context !== null ? ($context->ownerUserId ?? $userId) : $userId;
+        $ownerUserId = $context?->ownerUserId;
 
         $asset = new MediaAsset();
         $asset->id            = $id;
