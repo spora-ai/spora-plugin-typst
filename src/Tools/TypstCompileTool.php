@@ -118,7 +118,9 @@ final class TypstCompileTool extends AbstractTypstTool
     }
 
     /**
-     * @deprecated 1.0 pass $context->ownerUserId instead; removed from the interface in core 0.30.0.
+     * @param  int|null  $userId  Deprecated: same value as `$context->ownerUserId`, which
+     *                             always held this same value. Removed from the interface
+     *                             in core 0.30.0 — read the context instead.
      */
     public function execute(
         array $arguments,
@@ -131,7 +133,7 @@ final class TypstCompileTool extends AbstractTypstTool
         $action  = $this->resolveAction($arguments);
 
         return match ($action) {
-            'inspect' => $this->inspectSource($arguments, $ownerId, $context),
+            'inspect' => $this->inspectSource($arguments, $context),
             'render', '' => $this->renderSource($arguments, $agentId, $ownerId, $context),
             default    => new ToolResult(false, sprintf(
                 'typst_compile: unknown action "%s" (expected: render | inspect)',
@@ -171,10 +173,10 @@ final class TypstCompileTool extends AbstractTypstTool
         return 'inline';
     }
 
-    private function inspectSource(array $arguments, ?int $userId, ?PrincipalContext $context): ToolResult
+    private function inspectSource(array $arguments, ?PrincipalContext $context): ToolResult
     {
         try {
-            $resolved = $this->resolveSourceBytes($arguments, $context, $userId);
+            $resolved = $this->resolveSourceBytes($arguments, $context);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
@@ -240,7 +242,7 @@ final class TypstCompileTool extends AbstractTypstTool
                 ));
             }
 
-            $resolved = $this->resolveSourceForRender($arguments, $agentId, $userId, $context);
+            $resolved = $this->resolveSourceForRender($arguments, $agentId, $context);
             $producer = $this->findProducer();
             if ($producer === null) {
                 throw new TypstRuntimeException('typst_compile: TypstRenderProducer is not registered. Was the plugin boot hooked correctly?');

@@ -81,7 +81,7 @@ abstract class AbstractTypstTool extends AbstractTool
      *
      * @return array{bytes: string, parent: ?MediaAsset}
      */
-    protected function resolveSourceBytes(array $arguments, ?PrincipalContext $context, ?int $userId): array
+    protected function resolveSourceBytes(array $arguments, ?PrincipalContext $context): array
     {
         $source = $arguments['source'] ?? null;
         $fileId = $arguments['file'] ?? null;
@@ -90,7 +90,7 @@ abstract class AbstractTypstTool extends AbstractTool
             return ['bytes' => $source, 'parent' => null];
         }
         if (is_string($fileId) && $fileId !== '') {
-            $loaded = $this->loadAssetSource($fileId, $context, $userId);
+            $loaded = $this->loadAssetSource($fileId, $context);
             return ['bytes' => $loaded['bytes'], 'parent' => null];
         }
 
@@ -121,14 +121,13 @@ abstract class AbstractTypstTool extends AbstractTool
     protected function resolveSourceForRender(
         array $arguments,
         int $agentId,
-        ?int $userId,
         ?PrincipalContext $context,
     ): array {
         $source = $arguments['source'] ?? null;
         $fileId = $arguments['file'] ?? null;
 
         if (is_string($fileId) && $fileId !== '') {
-            $loaded = $this->loadAssetSource($fileId, $context, $userId);
+            $loaded = $this->loadAssetSource($fileId, $context);
             if ($loaded['parent'] !== null) {
                 return $loaded;
             }
@@ -137,7 +136,6 @@ abstract class AbstractTypstTool extends AbstractTool
                 $loaded['bytes'],
                 $name,
                 $agentId,
-                $userId,
                 $context,
             );
             return ['bytes' => $loaded['bytes'], 'parent' => $parent];
@@ -149,7 +147,7 @@ abstract class AbstractTypstTool extends AbstractTool
                 $rawName = $this->autoFilename();
             }
             $name = TypstFilename::sanitise($rawName, 'inline.typ');
-            $parent = $this->materialiseNamedInlineSource($source, $name, $agentId, $userId, $context);
+            $parent = $this->materialiseNamedInlineSource($source, $name, $agentId, $context);
             return ['bytes' => $source, 'parent' => $parent];
         }
 
@@ -184,11 +182,11 @@ abstract class AbstractTypstTool extends AbstractTool
      * `null` for filesystem lookups — the render path's caller
      * materialises a fresh parent from the bytes.
      */
-    private function loadAssetSource(string $fileId, ?PrincipalContext $context, ?int $userId): array
+    private function loadAssetSource(string $fileId, ?PrincipalContext $context): array
     {
         $asset = MediaAsset::query()->find($fileId);
         if ($asset !== null) {
-            if (!$this->assetIsVisibleTo($asset, $context, $userId)) {
+            if (!$this->assetIsVisibleTo($asset, $context)) {
                 throw new TypstRuntimeException(sprintf('Typst tool: media asset "%s" not visible', $fileId));
             }
             $bytes = match ($asset->storage_mode) {
@@ -261,13 +259,13 @@ abstract class AbstractTypstTool extends AbstractTool
      * user_id must match the caller's owner user id, OR the asset is
      * attached to an agent in the caller's principal.
      */
-    private function assetIsVisibleTo(MediaAsset $asset, ?PrincipalContext $context, ?int $userId): bool
+    private function assetIsVisibleTo(MediaAsset $asset, ?PrincipalContext $context): bool
     {
         if ($context === null) {
             return false;
         }
         $principalId = $context->principalId;
-        $ownerUserId = $context->ownerUserId ?? $userId;
+        $ownerUserId = $context->ownerUserId;
         if ($principalId <= 0 || $ownerUserId === null) {
             return false;
         }
@@ -335,12 +333,11 @@ abstract class AbstractTypstTool extends AbstractTool
         string $source,
         string $filename,
         int $agentId,
-        ?int $userId,
         ?PrincipalContext $context,
     ): MediaAsset {
         $id = $this->generateUuid();
         $principalId = $context !== null ? $context->principalId : 0;
-        $ownerUserId = $context !== null ? ($context->ownerUserId ?? $userId) : $userId;
+        $ownerUserId = $context?->ownerUserId;
 
         $asset = new MediaAsset();
         $asset->id            = $id;
