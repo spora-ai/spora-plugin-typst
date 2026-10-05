@@ -131,6 +131,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         $this->importer = $importer ?? new TypstImageImporter();
     }
 
+    /**
+     * @deprecated 1.0 pass $context->ownerUserId instead; removed from the interface in core 0.30.0.
+     */
     public function execute(
         array $arguments,
         int $agentId,
@@ -138,8 +141,9 @@ final class TypstResourcesTool extends AbstractTypstTool
         ?int $taskId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
-        $action = $this->resolveAction($arguments);
-        $op     = strtolower(trim((string) ($arguments['op'] ?? 'list')));
+        $ownerId = $context?->ownerUserId;
+        $action  = $this->resolveAction($arguments);
+        $op      = strtolower(trim((string) ($arguments['op'] ?? 'list')));
 
         if (!in_array($op, ['list', 'write', 'delete', 'read', 'import'], true)) {
             return new ToolResult(false, sprintf(
@@ -170,7 +174,7 @@ final class TypstResourcesTool extends AbstractTypstTool
             'templates'    => $this->dispatchResource($paths, 'template', $op, $arguments),
             'examples'     => $this->dispatchResource($paths, 'example', $op, $arguments),
             'images'       => $this->dispatchImage($paths, $op, $arguments),
-            'media_assets' => $this->importImage($paths, $arguments, $userId),
+            'media_assets' => $this->importImage($paths, $arguments, $ownerId),
             default        => new ToolResult(false, sprintf(
                 'typst_resources: unknown action "%s" (expected: fonts, templates, examples, images, media_assets)',
                 $action,
