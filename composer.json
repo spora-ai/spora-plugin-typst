@@ -49,6 +49,18 @@
             "spora-ai/spora-core": "source"
         }
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../spora-core",
+            "options": {
+                "symlink": true,
+                "versions": {
+                    "spora-ai/spora-core": "0.30.0"
+                }
+            }
+        }
+    ],
     "minimum-stability": "dev",
     "prefer-stable": true
 }
