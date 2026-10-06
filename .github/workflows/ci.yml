@@ -223,7 +223,20 @@ jobs:
           composer config allow-plugins.pestphp/pest-plugin true
           composer config allow-plugins.spora-ai/installer true
           composer config allow-plugins.composer/installers true
-          composer config repositories.spora-core path "$GITHUB_WORKSPACE/spora-core"
+          # `options.versions` pins the version this path repo reports,
+          # the same way the plugin's own `repositories` entry does.
+          # Without it composer derives the version from the checkout's
+          # git state, and a detached `main` reports `dev-main` — which
+          # satisfies no numeric constraint, so the skeleton's require
+          # fails with:
+          #   spora-ai/spora-plugin-typst dev-<sha> requires
+          #   spora-ai/spora-core >=0.30.0 <2.0.0
+          #     -> found spora-ai/spora-core[dev-main] but it does not
+          #        match the constraint.
+          # The pin is what lets this job resolve core `main` at all
+          # while 0.30.0 is still untagged. It goes away with the
+          # plugin's own `repositories` entry, once core is released.
+          composer config repositories.spora-core '{"type":"path","url":"'"$GITHUB_WORKSPACE"'/spora-core","options":{"symlink":true,"versions":{"spora-ai/spora-core":"0.30.0"}}}'
           composer config repositories.typst path "$GITHUB_WORKSPACE"
 
       - name: Install skeleton + spora-core + plugin
