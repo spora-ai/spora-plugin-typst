@@ -29,7 +29,7 @@ final class TypstImageImporter
     private const TOOL_PREFIX = 'typst_resources: ';
 
     /**
-     * @var (Closure(string $id, ?int $userId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, sourceUrl?: string}|null)|null
+     * @var (Closure(string $id, ?int $ownerUserId): ?array{status: 'data_url'|'local'|'external', bytes?: string, mime?: string, sourceUrl?: string}|null)|null
      */
     private readonly ?Closure $mediaAssetReader;
 
@@ -38,14 +38,14 @@ final class TypstImageImporter
         $this->mediaAssetReader = $mediaAssetReader;
     }
 
-    public function import(TypstResourcePaths $paths, array $arguments, ?int $userId): ToolResult
+    public function import(TypstResourcePaths $paths, array $arguments, ?int $ownerUserId): ToolResult
     {
         $assetId = $this->resolveImportAssetId($arguments);
         if ($assetId instanceof ToolResult) {
             return $assetId;
         }
 
-        $payload = $this->fetchImportPayload($assetId, $userId);
+        $payload = $this->fetchImportPayload($assetId, $ownerUserId);
         if ($payload instanceof ToolResult) {
             return $payload;
         }
@@ -79,12 +79,12 @@ final class TypstImageImporter
     /**
      * @return array{status: string, bytes?: string, mime?: string, sourceUrl?: string}|ToolResult
      */
-    private function fetchImportPayload(string $assetId, ?int $userId): array|ToolResult
+    private function fetchImportPayload(string $assetId, ?int $ownerUserId): array|ToolResult
     {
         if ($this->mediaAssetReader === null) {
             return new ToolResult(false, self::TOOL_PREFIX . 'import is not configured (MediaAssetReader not wired)');
         }
-        $payload = ($this->mediaAssetReader)($assetId, $userId);
+        $payload = ($this->mediaAssetReader)($assetId, $ownerUserId);
         if ($payload === null) {
             return new ToolResult(false, sprintf(
                 '%smedia asset %s not found in the Media Archive, or not accessible to this caller',

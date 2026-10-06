@@ -117,6 +117,16 @@ final class TypstCompileTool extends AbstractTypstTool
         parent::__construct($worldFactory);
     }
 
+    /**
+     * Reads the paying principal off `$context` — core 0.30.0 removed the
+     * legacy fifth `$userId` parameter, which always held the same value as
+     * `$context->ownerUserId`. That owner id is what attributes the rendered
+     * derivative row (`MediaDerivativeService::create()`); the HTTP preview
+     * controller resolves its own owner from the session, so both paths
+     * persist into the same principal scope.
+     *
+     * @param array<string, mixed> $arguments
+     */
     public function execute(
         array $arguments,
         int $agentId,
@@ -225,7 +235,7 @@ final class TypstCompileTool extends AbstractTypstTool
         );
     }
 
-    private function renderSource(array $arguments, int $agentId, ?int $userId, ?PrincipalContext $context): ToolResult
+    private function renderSource(array $arguments, int $agentId, ?int $ownerUserId, ?PrincipalContext $context): ToolResult
     {
         try {
             $format = strtolower(trim((string) ($arguments['format'] ?? 'pdf')));
@@ -246,10 +256,10 @@ final class TypstCompileTool extends AbstractTypstTool
                 $resolved['parent'],
                 $format,
                 $arguments,
-                $userId,
+                $ownerUserId,
                 $context,
             );
-            return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format, $userId, $context);
+            return $this->buildSuccessToolResult($derivative, $resolved['parent'], $format, $ownerUserId, $context);
         } catch (InvalidArgumentException | RuntimeException $e) {
             return new ToolResult(false, $e->getMessage());
         }
@@ -266,7 +276,7 @@ final class TypstCompileTool extends AbstractTypstTool
         MediaAsset $parent,
         string $format,
         array $arguments,
-        ?int $userId,
+        ?int $ownerUserId,
         ?PrincipalContext $context,
     ): MediaAsset {
         $page = isset($arguments['page']) ? max(0, (int) $arguments['page']) : null;
@@ -301,7 +311,9 @@ final class TypstCompileTool extends AbstractTypstTool
                 format: $format,
                 producerPlugin: $producer->pluginSlug(),
                 producerOperation: $producer->operationName(),
-                userId: $userId,
+                // Core's `MediaDerivativeService::create()` still names this
+                // parameter `$userId`; the value is the principal's owner.
+                userId: $ownerUserId,
                 context: $context,
             );
         } catch (Throwable $e) {
@@ -361,7 +373,7 @@ final class TypstCompileTool extends AbstractTypstTool
         MediaAsset $derivative,
         MediaAsset $parent,
         string $format,
-        ?int $userId = null,
+        ?int $ownerUserId = null,
         ?PrincipalContext $context = null,
     ): ToolResult {
         $url = $derivative->asset_url;
@@ -373,11 +385,11 @@ final class TypstCompileTool extends AbstractTypstTool
         // a previous incarnation called firstPagePngDerivative()
         // twice (once here, once in pdfRenderContent()), which double-
         // rendered the page AND let the second call persist the row
-        // with userId=null on its own (when the first call returned
+        // with a null owner on its own (when the first call returned
         // null, e.g. producer un-registered), leaving the PNG row
         // unscoped against MediaTool::assetInScope.
         $preview = $format === 'pdf'
-            ? $this->firstPagePngDerivative($parent, $userId, $context)
+            ? $this->firstPagePngDerivative($parent, $ownerUserId, $context)
             : null;
 
         $body = match (true) {
@@ -461,13 +473,13 @@ final class TypstCompileTool extends AbstractTypstTool
      * shows a preview. Returns the preview `MediaAsset` or null when
      * the producer or persistence path fails — the parent render
      * still succeeds; the preview is best-effort. The PNG is
-     * persisted with the render call's `userId`/`context` so the
+     * persisted with the render call's owner/`context` so the
      * resulting row is in the same principal + user scope as the
      * source (passing `null/null` here would leave the row's
      * `user_id` empty and `media.get_media(preview_id)` would
      * reject it under the agent's owner-scope check).
      */
-    private function firstPagePngDerivative(MediaAsset $parent, ?int $userId = null, ?PrincipalContext $context = null): ?MediaAsset
+    private function firstPagePngDerivative(MediaAsset $parent, ?int $ownerUserId = null, ?PrincipalContext $context = null): ?MediaAsset
     {
         $producer = $this->findProducer();
         if ($producer === null) {
@@ -481,7 +493,9 @@ final class TypstCompileTool extends AbstractTypstTool
                 format: 'png',
                 producerPlugin: $producer->pluginSlug(),
                 producerOperation: $producer->operationName(),
-                userId: $userId,
+                // Core's `MediaDerivativeService::create()` still names this
+                // parameter `$userId`; the value is the principal's owner.
+                userId: $ownerUserId,
                 context: $context,
             );
         } catch (Throwable) {

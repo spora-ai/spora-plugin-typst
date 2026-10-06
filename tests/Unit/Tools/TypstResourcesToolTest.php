@@ -48,7 +48,7 @@ beforeEach(function () {
     $this->mediaReader = new MediaAssetReader($this->database, $this->local);
     // `static fn` doesn't bind $this — capture the reader via `use`.
     $reader = $this->mediaReader;
-    $this->mediaReaderFn = static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
+    $this->mediaReaderFn = static fn(string $id, ?int $ownerUserId): ?array => $reader->readAsset($id, $ownerUserId);
 
     $this->context = new Spora\Services\PrincipalContext(
         principalId: $this->principalId,

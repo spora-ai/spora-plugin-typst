@@ -108,7 +108,7 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
                 // MuseImageArchiveResolver); see
                 // {@see \Spora\Plugins\Typst\Services\TypstImageImporter::import()}.
                 ->constructorParameter('mediaAssetReader', \DI\factory(static function (MediaAssetReader $reader): Closure {
-                    return static fn(string $id, ?int $userId): ?array => $reader->readAsset($id, $userId);
+                    return static fn(string $id, ?int $ownerUserId): ?array => $reader->readAsset($id, $ownerUserId);
                 })),
         ]);
 

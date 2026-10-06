@@ -131,6 +131,16 @@ final class TypstResourcesTool extends AbstractTypstTool
         $this->importer = $importer ?? new TypstImageImporter();
     }
 
+    /**
+     * Reads the paying principal off `$context` — core 0.30.0 removed the
+     * legacy fifth `$userId` parameter, which always held the same value as
+     * `$context->ownerUserId`. The store itself is scoped by
+     * `TypstResourcePaths`, which takes `$context->principalId`; the owner id
+     * is what the `media_assets` import path passes to the Media Archive
+     * reader so a cross-principal `asset_id` is rejected.
+     *
+     * @param array<string, mixed> $arguments
+     */
     public function execute(
         array $arguments,
         int $agentId,
@@ -491,8 +501,8 @@ final class TypstResourcesTool extends AbstractTypstTool
     private function importImage(
         TypstResourcePaths $paths,
         array $arguments,
-        ?int $userId,
+        ?int $ownerUserId,
     ): ToolResult {
-        return $this->importer->import($paths, $arguments, $userId);
+        return $this->importer->import($paths, $arguments, $ownerUserId);
     }
 }
