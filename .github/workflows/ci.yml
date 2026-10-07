@@ -47,13 +47,15 @@ jobs:
         continue-on-error: true
         run: pecl install typst
 
+      # spora-core resolves from Packagist against the declared floor,
+      # so a green run proves real-world compatibility.
       - name: Composer install
         # `--ignore-platform-req=ext-typst` lets composer resolve the
         # dependency tree when the PECL install above failed (it has
         # `continue-on-error: true` so a flaky install must not block
         # other CI steps). The runtime test cases skip themselves when
         # the extension is missing — see tests/Pest.php.
-        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Run Pest
         # PHP 8.4 also produces the coverage report + JUnit XML so the
@@ -96,8 +98,10 @@ jobs:
           coverage: none
           tools: composer
 
+      # spora-core resolves from Packagist against the declared floor,
+      # so a green run proves real-world compatibility.
       - name: Composer install
-        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Run PHPStan
         run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=512M
@@ -116,8 +120,10 @@ jobs:
           coverage: none
           tools: composer
 
+      # spora-core resolves from Packagist against the declared floor,
+      # so a green run proves real-world compatibility.
       - name: Composer install
-        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Check code style
         # Same ruleset as Spora core's .php-cs-fixer.php so plugin style matches host.
@@ -136,14 +142,6 @@ jobs:
       - name: Checkout plugin
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Checkout spora-core
-        # Sibling clone — composer path repos reference it via
-        # absolute paths from the skeleton's `composer.json`.
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-        with:
-          repository: spora-ai/spora-core
-          path: spora-core
-
       - name: Setup PHP
         uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2.37.2
         with:
@@ -154,11 +152,10 @@ jobs:
 
       - name: Bootstrap skeleton
         run: |
-          # Throwaway composer project that requires spora-core + this
-          # plugin as path repos. Mirrors spora-local/composer.json so
-          # the verification reflects the real operator wiring. Uses
-          # absolute paths so the path repos resolve regardless of
-          # the step's working directory.
+          # Throwaway composer project that requires this plugin as a
+          # path repo and resolves spora-core from Packagist. Mirrors
+          # spora-local/composer.json so the verification reflects the
+          # real operator wiring.
           mkdir -p /tmp/skeleton && cd /tmp/skeleton
           composer init --name=spora/test-skeleton --type=project --no-interaction --quiet
           composer config minimum-stability dev
@@ -166,7 +163,9 @@ jobs:
           composer config allow-plugins.pestphp/pest-plugin true
           composer config allow-plugins.spora-ai/installer true
           composer config allow-plugins.composer/installers true
-          composer config repositories.spora-core path "$GITHUB_WORKSPACE/spora-core"
+          # Only the plugin is a path repo — it is the code under test.
+          # spora-core comes from Packagist, so this job also proves the
+          # released v0.30.0 satisfies the plugin's declared floor.
           composer config repositories.typst path "$GITHUB_WORKSPACE"
 
       - name: Install skeleton + spora-core + plugin
@@ -175,7 +174,7 @@ jobs:
           # ext-typst isn't installed on the integration runner; mirror
           # the platform-req skip the plugin's own CI uses.
           composer require --no-interaction --ignore-platform-req=ext-typst \
-            spora-ai/spora-core:@dev \
+            spora-ai/spora-core:^0.30 \
             spora-ai/installer:^1.5 \
             "spora-ai/spora-plugin-typst:*@dev" 2>&1 | tail -30
 
@@ -249,8 +248,10 @@ jobs:
           coverage: pcov
           tools: composer
 
+      # spora-core resolves from Packagist against the declared floor,
+      # so a green run proves real-world compatibility.
       - name: Install
-        run: composer install --no-interaction --prefer-dist --ignore-platform-req=ext-typst
+        run: composer update spora-ai/spora-core --with-all-dependencies --no-interaction --prefer-dist --ignore-platform-req=ext-typst
 
       - name: Download coverage report
         # The Pest job writes coverage/clover.xml + coverage/junit.xml

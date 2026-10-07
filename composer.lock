@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "75c10324249f31bcb612ea7b177e91c1",
+    "content-hash": "e71d31093338181e32831c49b71d064f",
     "packages": [
         {
             "name": "brick/math",
@@ -1751,16 +1751,16 @@
         },
         {
             "name": "league/commonmark",
-            "version": "2.10.1",
+            "version": "2.10.3",
             "source": {
                 "type": "git",
                 "url": "https://github.com/thephpleague/commonmark.git",
-                "reference": "9d489ab67a02960fd8ffe624d93f751daf95439e"
+                "reference": "6efbd9c472b91db0a3350fcd601c8332c2382e1f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/thephpleague/commonmark/zipball/9d489ab67a02960fd8ffe624d93f751daf95439e",
-                "reference": "9d489ab67a02960fd8ffe624d93f751daf95439e",
+                "url": "https://api.github.com/repos/thephpleague/commonmark/zipball/6efbd9c472b91db0a3350fcd601c8332c2382e1f",
+                "reference": "6efbd9c472b91db0a3350fcd601c8332c2382e1f",
                 "shasum": ""
             },
             "require": {
@@ -1854,7 +1854,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-09-07T13:44:26+00:00"
+            "time": "2026-09-21T13:07:34+00:00"
         },
         {
             "name": "league/config",
@@ -3063,16 +3063,16 @@
         },
         {
             "name": "spora-ai/spora-core",
-            "version": "v0.23.0",
+            "version": "v0.30.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/spora-ai/spora-core.git",
-                "reference": "6a7f13fd8f74f8be68b869d39fa4e6ca6e6127f3"
+                "reference": "9960a46acb6193d539d5fbca7b099ed9bd38e34a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/6a7f13fd8f74f8be68b869d39fa4e6ca6e6127f3",
-                "reference": "6a7f13fd8f74f8be68b869d39fa4e6ca6e6127f3",
+                "url": "https://api.github.com/repos/spora-ai/spora-core/zipball/9960a46acb6193d539d5fbca7b099ed9bd38e34a",
+                "reference": "9960a46acb6193d539d5fbca7b099ed9bd38e34a",
                 "shasum": ""
             },
             "require": {
@@ -3140,9 +3140,9 @@
             "description": "A portable, zero-configuration AI agent orchestration platform that runs on any shared host (cPanel/FTP) without system dependencies beyond PHP 8.4+.",
             "support": {
                 "issues": "https://github.com/spora-ai/spora-core/issues",
-                "source": "https://github.com/spora-ai/spora-core/tree/v0.23.0"
+                "source": "https://github.com/spora-ai/spora-core/tree/v0.30.0"
             },
-            "time": "2026-09-10T10:33:58+00:00"
+            "time": "2026-10-06T19:56:30+00:00"
         },
         {
             "name": "spora-ai/spora-plugin-typst-frontend",
@@ -10237,9 +10237,7 @@
     ],
     "aliases": [],
     "minimum-stability": "dev",
-    "stability-flags": {
-        "spora-ai/spora-core": 20
-    },
+    "stability-flags": {},
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {
