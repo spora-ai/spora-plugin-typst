@@ -6,7 +6,7 @@ metadata:
   author: spora-ai
   version: "1.5"
   allowedByDefault: "false"
-  requiresTools: "typst_compile,typst_resources"
+allowed-tools: typst_compile typst_resources
 ---
 
 # Typst
