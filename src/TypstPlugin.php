@@ -224,9 +224,11 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
      *
      * Keys are the English source text — `de.json` reads
      * `{"Typst Compile": "Typst-Kompilierung"}`, not `{"tool": "…"}`. That
-     * is what makes the host's `i18n:check` able to fail when a string is
-     * edited without being re-translated: the key changes and the old
-     * entry orphans.
+     * is what makes a copy edit detectable: the key changes and the old
+     * entry orphans. The gate is this plugin's own `LocaleCatalogTest`, not
+     * the host's `i18n:check` — that command harvests core's `app/` and
+     * reads core's `locales/en.json`, so run against a plugin repo it
+     * reports every catalogue key as an orphan.
      *
      * **Only operator copy belongs in here.** A string the model reads is
      * never translated: neither `#[Tool].description`, nor any of the
@@ -234,11 +236,17 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
      * `#[ToolParameter].description` values. These two tools look
      * operator-facing but their text is all LLM payload. This plugin
      * declares no `#[ToolSetting]`, so `locales/de.json` holds the two
-     * tool display names plus the app's display name and description,
-     * all four of them operator-only.
+     * tool display names, the app's `description()` and the manifest
+     * description.
      *
-     * Requires `spora-core >= 0.31.0` at runtime; older versions fail to
-     * resolve the method when the loader is strict.
+     * The app's `displayName()` is deliberately absent: German spells
+     * "Typst" identically, and a German value identical to its key is an
+     * untranslated placeholder the catalogue gate rejects. A qualifier
+     * would rename the app rather than translate it.
+     *
+     * Requires `spora-core >= 0.31.0` for the catalogue to be loaded. On an
+     * older core the host never calls this hook and the plugin renders in
+     * English.
      *
      * @return string[]
      */
