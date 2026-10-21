@@ -28,31 +28,21 @@ use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 /**
  * Plugin entry point for `spora-plugin-typst`.
  *
- * Ships `skills/typst/` — Inter and Latin Modern Math under OFL, the
- * DejaVu families under Bitstream Vera / Arev — plus the `typst-expert`
- * agent template. The two tools, the admin app, the `/api/v1/typst/*`
- * routes and the media-derivatives producer are wired in the two event
- * handlers below.
- *
  * Architectural invariants:
  *
- *   - **Inputs on the filesystem, outputs in the media archive.**
- *     Fonts, templates and examples are plain files under
- *     `<storage>/typst/<principal>/{fonts,templates,examples}/`;
- *     images sit at the principal root so `#image("basename.jpg")`
- *     resolves against the same `template_dir` (see
- *     `TypstResourcePaths`). Only rendered output — PDF/PNG/SVG —
- *     reaches `MediaDerivativeService` → `media_assets` → `MediaEmbed`.
+ *   - **Inputs on the filesystem, outputs in the media archive.** Inputs
+ *     are plain files under `<storage>/typst/<principal>/`; images sit at
+ *     the principal root so `#image("basename.jpg")` resolves against the
+ *     same `template_dir`. Only rendered output — PDF/PNG/SVG — reaches
+ *     `MediaDerivativeService`.
  *
- *   - **No dependency on `spora-plugin-media-archive`.** Inputs are
- *     served by the plugin's own `/api/v1/typst/*` routes; outputs go
- *     through core's `MediaDerivativeService` and surface via core's
- *     `/api/v1/assets/<uuid>.<ext>`.
+ *   - **No dependency on `spora-plugin-media-archive`.** Inputs are served
+ *     by the plugin's own `/api/v1/typst/*` routes; outputs surface via
+ *     core's `/api/v1/assets/<uuid>.<ext>`.
  *
- *   - **Typst world is principal-scoped.** The per-principal
- *     `template_dir` deliberately excludes the bundled
- *     `skills/typst/{templates,examples}/`, so an operator can shadow a
- *     bundled file by uploading one of the same name.
+ *   - **Typst world is principal-scoped.** Its `template_dir` deliberately
+ *     excludes the bundled `skills/typst/{templates,examples}/`, so an
+ *     operator can shadow a bundled file by uploading one of the same name.
  */
 final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterface
 {
@@ -62,11 +52,9 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
     private const EXAMPLES_ROUTE_PATTERN = '/api/v1/typst/examples/{name}';
 
     /**
-     * Subscribes to the two spora-core lifecycle events that replace
-     * the deprecated `register()` / `routes()` hooks. The container
-     * event fires once per process (DI bindings + idempotent
-     * media-archive discovery re-registration); the routes event
-     * fires per request.
+     * The two spora-core lifecycle events that replace the deprecated
+     * `register()` / `routes()` hooks: the container event fires once per
+     * process, the routes event per request.
      */
     public static function getSubscribedEvents(): array
     {
@@ -77,14 +65,10 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
     }
 
     /**
-     * Wire DI bindings for the controllers + tools, and (idempotently)
-     * register the `TypstRenderProducer` with the media-derivatives
-     * discovery registry.
-     *
      * Load-bearing, not decorative: core's `MediaAllowedTypesService` unions
      * every producer's `supportedSourceFormats()` into the upload allowlist
-     * and `isAllowed()` matches by exact string, so dropping this makes
-     * `.typ` uploads 415. Core documents the union on that class.
+     * and `isAllowed()` matches by exact string, so dropping the
+     * registration makes `.typ` uploads 415.
      *
      * Discovery runs on every boot by design — the registry is an
      * in-process static that resets between tests, and `add()` no-ops when
@@ -104,9 +88,7 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
             TypstResourcesTool::class              => \DI\autowire(),
             TypstImageImporter::class              => \DI\autowire()
                 // Closure seam — keeps the plugin decoupled from the
-                // host's `final` MediaAssetReader (mirrors muse's
-                // MuseImageArchiveResolver); see
-                // {@see \Spora\Plugins\Typst\Services\TypstImageImporter::import()}.
+                // host's `final` MediaAssetReader.
                 ->constructorParameter('mediaAssetReader', \DI\factory(static function (MediaAssetReader $reader): Closure {
                     return static fn(string $id, ?int $ownerUserId): ?array => $reader->readAsset($id, $ownerUserId);
                 })),
@@ -116,55 +98,40 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
     }
 
     /**
-     * Register the 25 `/api/v1/typst/*` routes behind Auth + CSRF.
-     * Mirrors the spora-plugin-memories auth chain verbatim so the
-     * admin UI's fetch() calls Just Work.
+     * The plugin's `/api/v1/typst/*` routes, behind Auth + CSRF.
      */
     public function onRoutesRegistering(RoutesRegisteringEvent $event): void
     {
         $r = $event->routes();
 
-        // Fonts
         $r->addRoute('GET', '/api/v1/typst/fonts', [TypstFontController::class, 'index'], self::AUTH);
         $r->addRoute('GET', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/fonts', [TypstFontController::class, 'store'], self::AUTH);
         $r->addRoute('DELETE', '/api/v1/typst/fonts/{name}', [TypstFontController::class, 'destroy'], self::AUTH);
 
-        // Templates (full document skeletons)
         $r->addRoute('GET', '/api/v1/typst/templates', [TypstTemplateController::class, 'index'], self::AUTH);
         $r->addRoute('GET', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/templates', [TypstTemplateController::class, 'store'], self::AUTH);
         $r->addRoute('PUT', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'update'], self::AUTH);
         $r->addRoute('DELETE', self::TEMPLATES_ROUTE_PATTERN, [TypstTemplateController::class, 'destroy'], self::AUTH);
 
-        // Examples (small pattern snippets — separate kind, separate URL prefix)
         $r->addRoute('GET', '/api/v1/typst/examples', [TypstExampleController::class, 'index'], self::AUTH);
         $r->addRoute('GET', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/examples', [TypstExampleController::class, 'store'], self::AUTH);
         $r->addRoute('PUT', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'update'], self::AUTH);
         $r->addRoute('DELETE', self::EXAMPLES_ROUTE_PATTERN, [TypstExampleController::class, 'destroy'], self::AUTH);
 
-        // Images — the basename (not a row id) is the addressable key.
+        // Images are addressed by basename; the sources below by row id.
         $r->addRoute('GET', '/api/v1/typst/images', [TypstImageController::class, 'index'], self::AUTH);
         $r->addRoute('GET', '/api/v1/typst/images/{name}', [TypstImageController::class, 'show'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/images', [TypstImageController::class, 'store'], self::AUTH);
         $r->addRoute('DELETE', '/api/v1/typst/images/{name}', [TypstImageController::class, 'destroy'], self::AUTH);
 
-        // Editor — compile inline Typst source to PDF/PNG/SVG.
-        // /compile persists a media_assets + media_derivatives row;
-        // /preview returns the bytes inline and writes nothing. The
-        // operator-facing Editor tab defaults to /preview so each
-        // render doesn't add a parent row to the media archive; the
-        // LLM tool's typst_compile still uses /compile.
+        // /compile persists a parent row and its derivative; /preview
+        // returns the bytes inline and writes nothing.
         $r->addRoute('POST', '/api/v1/typst/compile', [TypstCompileController::class, 'compile'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/preview', [TypstPreviewController::class, 'preview'], self::AUTH);
 
-        // Playground source files — list/open/create/save/delete the
-        // .typ rows the compile endpoint materialises. The compile
-        // path upserts the parent row by (principal_id, tool_name,
-        // filename); this controller surfaces the rest of the
-        // lifecycle (create without rendering, open, edit, delete)
-        // for the operator UI.
         $r->addRoute('GET', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'index'], self::AUTH);
         $r->addRoute('POST', '/api/v1/typst/sources', [TypstPlaygroundSourceController::class, 'store'], self::AUTH);
         $r->addRoute('GET', self::SOURCES_ROUTE_PATTERN, [TypstPlaygroundSourceController::class, 'show'], self::AUTH);
@@ -219,34 +186,12 @@ final class TypstPlugin extends AbstractPlugin implements EventSubscriberInterfa
     }
 
     /**
-     * Translation catalogues this plugin ships, declared through
-     * {@see \Spora\Plugins\PluginInterface::translationsPaths()}.
+     * This plugin's catalogue directory: `locales/<lang>.json`, holding the
+     * plugin's operator copy. The gate that keeps it in step with the source
+     * is `tests/Unit/LocaleCatalogTest.php`.
      *
-     * Keys are the English source text — `de.json` reads
-     * `{"Typst Compile": "Typst-Kompilierung"}`, not `{"tool": "…"}`. That
-     * is what makes a copy edit detectable: the key changes and the old
-     * entry orphans. The gate is this plugin's own `LocaleCatalogTest`, not
-     * the host's `i18n:check` — that command harvests core's `app/` and
-     * reads core's `locales/en.json`, so run against a plugin repo it
-     * reports every catalogue key as an orphan.
-     *
-     * **Only operator copy belongs in here.** A string the model reads is
-     * never translated: neither `#[Tool].description`, nor any of the
-     * seven `#[ToolOperation].description` values, nor any of the
-     * `#[ToolParameter].description` values. These two tools look
-     * operator-facing but their text is all LLM payload. This plugin
-     * declares no `#[ToolSetting]`, so `locales/de.json` holds the two
-     * tool display names, the app's `description()` and the manifest
-     * description.
-     *
-     * The app's `displayName()` is deliberately absent: German spells
-     * "Typst" identically, and a German value identical to its key is an
-     * untranslated placeholder the catalogue gate rejects. A qualifier
-     * would rename the app rather than translate it.
-     *
-     * Requires `spora-core >= 0.31.0` for the catalogue to be loaded. On an
-     * older core the host never calls this hook and the plugin renders in
-     * English.
+     * Needs a core that reads `translationsPaths()` — 0.31.0 and later; older
+     * cores never call the hook, so the copy stays English.
      *
      * @return string[]
      */

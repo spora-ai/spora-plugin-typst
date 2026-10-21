@@ -10,14 +10,10 @@ $pluginRoot = dirname(__DIR__, 2);
 /**
  * Every English literal the plugin's own source writes, decoded.
  *
- * A catalogue key is the English source string byte for byte, so a key the
- * source no longer produces is an orphan — the copy edit that was never
- * re-translated. The literals are read through the tokenizer rather than
- * searched as raw text, because the source writes an apostrophe as `\'`
- * and a raw substring search would never match the key.
- *
- * The manifest description counts as source: it is the plugin's own
- * English copy and `locales/de.json` translates it.
+ * Read through the tokenizer rather than searched as raw text: the source
+ * writes an apostrophe as `\'`, which a raw substring search would never
+ * match. The manifest description counts as source — it is the plugin's own
+ * English copy, and `locales/de.json` translates it.
  *
  * @return list<string>
  */
@@ -108,10 +104,9 @@ it('never keys a message on an interpolated template', function () use ($pluginR
     $interpolated = [];
 
     foreach ($messages as $english => $german) {
-        // A `{$var}` interpolation is invisible to the host: it looks the
-        // rendered string up and matches it against the catalogue's
-        // `%s` / `%d` templates, and a key with no placeholder is not a
-        // template. Such a key can never resolve.
+        // A `{$var}` interpolation is invisible to the host: it matches
+        // against the catalogue's `%s` / `%d` templates, and a key with no
+        // placeholder is not a template — such a key never resolves.
         foreach ([(string) $english, (string) $german] as $text) {
             if (preg_match('/\{\$[A-Za-z_][A-Za-z0-9_]*\}/', $text) === 1) {
                 $interpolated[] = $text;
