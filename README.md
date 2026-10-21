@@ -270,6 +270,41 @@ media-archive gallery surface them. Per the architecture decision in
 the PR that introduced the image-library refactor: inputs on the
 filesystem, outputs in the media archive.
 
+## Translations
+
+This plugin ships a German catalogue at [`locales/de.json`](locales/de.json),
+declared through `translationsPaths()` in `src/TypstPlugin.php`. The host merges
+it under core's own catalogue, so a German install reads the plugin's operator
+copy in German.
+
+The **key is the English source string**, byte for byte — editing the English
+in the source changes the key, so the old entry stops matching and the new
+English has no entry. The gate is this repository's own
+`tests/Unit/LocaleCatalogTest.php`: it fails on an empty translation, on a
+translation identical to its key, and on a key the source no longer produces.
+
+**Translated**
+
+- the two tool display names — `Typst Compile` and `Typst Resources`
+- the admin app's `description()`
+- the `plugin.json` description
+
+`TypstApp::displayName()` is deliberately **absent** from the catalogue.
+German spells "Typst" identically, and a German value identical to its key is
+an untranslated placeholder the catalogue gate rejects; inventing a qualifier
+("Typst-Dokumente") would rename the app rather than translate it.
+
+**Never translated** — these strings are read by the model, so the operator
+sees exactly what the model sees:
+
+- `#[Tool].description`
+- `#[ToolOperation].description`
+- `#[ToolParameter].description`
+- every `#[ToolSetting].label` and its option labels, including the labels of
+  settings that carry `exposeToLlm: true`
+
+See the [plugin author guide → Translations](https://docs.spora-ai.com/develop/plugins/author-guide/translations).
+
 ## Local development
 
 In `spora-local`, add the plugin as a path repo to test it against the
@@ -298,6 +333,8 @@ plugin loader automatically.
 .
 ├── composer.json          # spora-ai/spora-plugin-typst + ext-typst + spora-core >=0.20.0
 ├── plugin.json            # manifest (class=FQCN, slug=typst, icon=file-type-2)
+├── locales/
+│   └── de.json            # German catalogue, keyed by the English source string
 ├── src/
 │   ├── TypstPlugin.php                # entry point (register, routes, tools, apps)
 │   ├── TypstApp.php                   # admin-app metadata (name=typst, entry=main.js)

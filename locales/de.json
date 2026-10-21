@@ -1,0 +1,6 @@
+{
+  "Compile Typst source to PDF / PNG / SVG. Manage plugin fonts and per-principal example templates.": "Typst-Quelltext nach PDF / PNG / SVG kompilieren. Plugin-Schriften und Beispielvorlagen pro Principal verwalten.",
+  "Typst Compile": "Typst-Kompilierung",
+  "Typst Resources": "Typst-Ressourcen",
+  "Compile Typst source to PDF/PNG/SVG via ext-typst; ships Inter OFL fonts and a writable per-principal example store.": "Kompiliert Typst-Quellen über ext-typst nach PDF/PNG/SVG; liefert Inter-OFL-Schriften und einen beschreibbaren Beispielspeicher pro Principal."
+}
