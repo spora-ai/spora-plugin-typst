@@ -24,6 +24,7 @@ use Delight\Auth\Auth as DelightAuth;
 use Illuminate\Database\Capsule\Manager as Capsule;
 use Mockery as M;
 use Spora\Auth\AuthService;
+use Spora\Core\Config;
 use Spora\Core\Database;
 use Spora\Core\DatabaseSchemaInstaller;
 use Spora\Services\MediaArchive\MediaDerivativeProducerDiscovery;
@@ -93,7 +94,7 @@ uses()
     ->beforeEach(function () {
         Database::resetBootState();
         $tmpDb = sys_get_temp_dir() . '/spora-plugin-typst-' . bin2hex(random_bytes(4)) . '.sqlite';
-        $db = new Database(['db_driver' => 'sqlite', 'db_path' => $tmpDb]);
+        $db = new Database(new Config(['SPORA_DB_DRIVER' => 'sqlite', 'SPORA_DB_PATH' => $tmpDb]));
         $db->bootDatabaseConnectionOnly();
 
         // Install the full core migration set (the plugin owns no
