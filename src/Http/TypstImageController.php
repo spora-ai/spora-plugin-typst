@@ -103,12 +103,27 @@ final class TypstImageController
             return $this->notFound('NOT_FOUND', sprintf('Image "%s" not found', $name));
         }
         $mime = $this->mimeFromName($name);
-        return new Response($bytes, Response::HTTP_OK, [
-            'Content-Type'        => $mime,
-            'Content-Length'      => (string) strlen($bytes),
-            'Content-Disposition' => sprintf('inline; filename="%s"', addslashes($name)),
-            'Cache-Control'       => 'private, max-age=300',
-        ]);
+        $headers = [
+            'Content-Type'           => $mime,
+            'Content-Length'         => (string) strlen($bytes),
+            'Content-Disposition'    => sprintf('inline; filename="%s"', addslashes($name)),
+            'Cache-Control'          => 'private, max-age=300',
+            'X-Content-Type-Options' => 'nosniff',
+        ];
+
+        // The image library accepts SVG, and a browser parses an SVG as a
+        // document that can carry script. The document still renders; its
+        // script does not run, and it cannot reach the operator's origin.
+        //
+        // The policy is the plugin's own rather than core's: these are the
+        // plugin's bytes, from the plugin's own vocabulary of four types,
+        // and exactly one of them is script-capable. Core's media archive
+        // applies the same rule to the bytes it serves.
+        if (in_array($mime, TypstImageStore::SCRIPT_CAPABLE_MIMES, true)) {
+            $headers['Content-Security-Policy'] = 'sandbox';
+        }
+
+        return new Response($bytes, Response::HTTP_OK, $headers);
     }
 
     /**

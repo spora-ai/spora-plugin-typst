@@ -55,6 +55,19 @@ final class TypstImageStore
         self::MIME_SVG,
     ];
 
+    /**
+     * The MIME types a browser parses as a *document*, and therefore as
+     * something that can carry script.
+     *
+     * The library serves four types and exactly one of them is in that
+     * class: an SVG is XML a browser parses as a document, with the script
+     * elements an HTML document has. The type is served in a sandbox, so
+     * the document renders and its script does not run.
+     */
+    public const SCRIPT_CAPABLE_MIMES = [
+        self::MIME_SVG,
+    ];
+
     public const MIME_TO_EXT = [
         self::MIME_PNG => 'png',
         self::MIME_JPEG => 'jpg',

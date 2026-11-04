@@ -169,6 +169,44 @@ it('GET /typst/images/{name} streams the bytes with the right mime', function ()
     expect((string) $resp->getContent())->toBe('PNGBYTES');
 });
 
+it('GET /typst/images/{name} sandboxes an SVG, which is script-capable', function () {
+    // The image library accepts SVG, and a browser parses an SVG as a
+    // document that can carry script. The sandbox is the plugin's own
+    // policy — it serves four image types from its own store, and exactly
+    // one of them is script-capable.
+    $principalId = $this->principalService->ensureUserPrincipal(
+        $this->auth->currentUserId(),
+    )->id;
+    $store = new TypstImageStore(new TypstResourcePaths($this->paths, $principalId));
+    $store->write('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', 'image/svg+xml', 'vector.svg');
+
+    $req = Request::create('/api/v1/typst/images/vector.svg', 'GET');
+    $req->attributes->set('name', 'vector.svg');
+    $resp = $this->controller->show($req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect($resp->headers->get('X-Content-Type-Options'))->toBe('nosniff');
+    expect($resp->headers->get('Content-Security-Policy'))->toBe('sandbox');
+});
+
+it('GET /typst/images/{name} sends nosniff for a raster image', function () {
+    $principalId = $this->principalService->ensureUserPrincipal(
+        $this->auth->currentUserId(),
+    )->id;
+    $store = new TypstImageStore(new TypstResourcePaths($this->paths, $principalId));
+    $store->write('PNGBYTES', PNG_MIME, 'logo.png');
+
+    $req = Request::create('/api/v1/typst/images/logo.png', 'GET');
+    $req->attributes->set('name', 'logo.png');
+    $resp = $this->controller->show($req);
+
+    expect($resp->getStatusCode())->toBe(200);
+    expect($resp->headers->get('X-Content-Type-Options'))->toBe('nosniff');
+    // A raster image has no execution model, so the sandbox would say
+    // nothing the type does not.
+    expect($resp->headers->get('Content-Security-Policy'))->toBeNull();
+});
+
 it('GET /typst/images/{name} returns 404 for a missing image', function () {
     $req = Request::create('/api/v1/typst/images/missing.png', 'GET');
     $req->attributes->set('name', 'missing.png');
