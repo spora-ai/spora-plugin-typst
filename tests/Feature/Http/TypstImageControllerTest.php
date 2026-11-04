@@ -171,11 +171,9 @@ it('GET /typst/images/{name} streams the bytes with the right mime', function ()
 
 it('GET /typst/images/{name} sandboxes an SVG, which is script-capable', function () {
     // The image library accepts SVG, and a browser parses an SVG as a
-    // document that can carry script. Core's media archive serves the same
-    // bytes through
-    // {@see \Spora\Services\MediaArchive\MediaScriptableTypes::headersFor()},
-    // so this route uses the same helper rather than a second answer to
-    // "what headers does a script-capable asset get".
+    // document that can carry script. The sandbox is the plugin's own
+    // policy — it serves four image types from its own store, and exactly
+    // one of them is script-capable.
     $principalId = $this->principalService->ensureUserPrincipal(
         $this->auth->currentUserId(),
     )->id;

@@ -165,7 +165,7 @@ jobs:
           composer config allow-plugins.composer/installers true
           # Only the plugin is a path repo — it is the code under test.
           # spora-core comes from Packagist, so this job also proves the
-          # released floor satisfies the plugin's declared constraint.
+          # released v0.30.0 satisfies the plugin's declared floor.
           composer config repositories.typst path "$GITHUB_WORKSPACE"
 
       - name: Install skeleton + spora-core + plugin
@@ -173,14 +173,8 @@ jobs:
         run: |
           # ext-typst isn't installed on the integration runner; mirror
           # the platform-req skip the plugin's own CI uses.
-          #
-          # The core constraint is the plugin's own: `>=0.33.0` once
-          # 0.33.0 is released, and the `dev-feat/scriptable-media-types`
-          # branch until then. That branch carries
-          # `MediaScriptableTypes`, the helper the plugin's image route
-          # now serves its SVG through.
           composer require --no-interaction --ignore-platform-req=ext-typst \
-            "spora-ai/spora-core:>=0.33.0 <2.0.0 || dev-feat/scriptable-media-types" \
+            spora-ai/spora-core:^0.30 \
             spora-ai/installer:^1.5 \
             "spora-ai/spora-plugin-typst:*@dev" 2>&1 | tail -30
 
