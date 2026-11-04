@@ -11,6 +11,7 @@ use Spora\Http\JsonControllerHelpers;
 use Spora\Plugins\Typst\Exceptions\TypstRuntimeException;
 use Spora\Plugins\Typst\Services\TypstImageStore;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
+use Spora\Services\MediaArchive\MediaScriptableTypes;
 use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -108,7 +109,13 @@ final class TypstImageController
             'Content-Length'      => (string) strlen($bytes),
             'Content-Disposition' => sprintf('inline; filename="%s"', addslashes($name)),
             'Cache-Control'       => 'private, max-age=300',
-        ]);
+            // The image library accepts SVG, and a browser parses an SVG as
+            // a document that can carry script. Core's media archive serves
+            // the same bytes through
+            // {@see \Spora\Services\MediaArchive\MediaScriptableTypes::headersFor()},
+            // so this route uses the same helper rather than a second
+            // answer to "what headers does a script-capable asset get".
+        ] + MediaScriptableTypes::headersFor($mime));
     }
 
     /**
