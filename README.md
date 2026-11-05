@@ -190,8 +190,12 @@ allowlist. The refusal comes from core's derivative service, not from
 this plugin — it reports `The producer emitted "image/svg+xml", which
 the operator has not permitted. Enable "Allow HTML and SVG" in the
 media settings to allow it.`, and the compile endpoint answers 422
-(`PERSISTENCE_FAILED`). `/preview` writes no derivative row, so it
-returns an SVG whatever the operator's setting is.
+(`PERSISTENCE_FAILED`). That refusal needs the first spora-core
+release that carries it
+([spora-core#315](https://github.com/spora-ai/spora-core/pull/315));
+on an earlier core the SVG derivative is created instead of refused.
+`/preview` writes no derivative row, so it returns an SVG whatever the
+operator's setting is.
 
 The `name` field is **optional** for inline `source` — when omitted, the
 tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` so the LLM
