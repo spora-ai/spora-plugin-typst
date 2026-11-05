@@ -78,7 +78,7 @@ The plugin's test suite has two parts:
 
 | Tool | Operations | Notes |
 | --- | --- | --- |
-| `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval by default; the `typst-expert` agent template flips it auto-approved). The response's `data.source_id` is the parent `.typ` row (`media.get_source(source_id)` returns the bytes); `data.derivative_id` is the rendered bytes; `data.preview_id` (PDF only) is the first-page PNG sibling. `inspect` is a read-only error-only pass (auto-approved). |
+| `typst_compile` | `render` / `inspect` | `render` compiles source → PDF / PNG / SVG and persists as a media-derivative (requires approval by default; the `typst-expert` agent template flips it auto-approved). An SVG derivative is refused unless the operator has enabled `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` — a browser parses an SVG as a document that can carry script. The response's `data.source_id` is the parent `.typ` row (`media.get_source(source_id)` returns the bytes); `data.derivative_id` is the rendered bytes; `data.preview_id` (PDF only) is the first-page PNG sibling. `inspect` is a read-only error-only pass (auto-approved). |
 | `typst_resources` | `fonts` / `templates` / `examples` / `images` / `media_assets` | Each operation picks the resource kind; the `op` parameter picks the verb (`list` / `write` / `delete` / `read` for the four filesystem kinds; `import` for `media_assets`). `read` returns the bytes so the agent can iterate (`list → read → modify → write → render`) — text kinds inline UTF-8, binary kinds (`fonts`, `images`) return base64 under `data.content_base64`. `media_assets: import` copies a Media Archive asset into the principal's image library so a follow-up `#image()` can resolve it (Media Archive URLs themselves don't work in `#image()` — ext-typst treats paths as filesystem-relative). Read-only ops are auto-approved; `write` and `delete` require approval. |
 
 `typst_compile` accepts the source as either:
@@ -156,6 +156,14 @@ controller uses the host's `AssetStore` to persist bytes, so storage
 mode (`data_url` vs `local`) follows the operator's existing
 configuration.
 
+An SVG in the library is served with `Content-Security-Policy: sandbox`,
+so the document renders and its script does not run; every image
+response carries `X-Content-Type-Options: nosniff`. The library is the
+plugin's own filesystem store, so it accepts an SVG upload whatever the
+operator's `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` setting is — that
+toggle governs the media archive, where a *compiled* SVG would land (see
+[Playground compile](#playground-compile)).
+
 ## Playground compile
 
 The `/apps/typst` admin panel ships a Playground tab where the operator
@@ -164,8 +172,8 @@ SVG. The compile flow is exposed as:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, name, format, page, ppi }`) |
-| `POST` | `/api/v1/typst/preview` | Compile inline source to PDF/PNG/SVG and return the bytes inline as base64 — no DB writes (`{ source, name, format, page, ppi }`) |
+| `POST` | `/api/v1/typst/compile` | Compile inline source to PDF/PNG/SVG (`{ source, name, format, page, ppi }`) — an SVG format is refused unless the operator has enabled `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` |
+| `POST` | `/api/v1/typst/preview` | Compile inline source to PDF/PNG/SVG and return the bytes inline as base64 — no DB writes, so the SVG refusal above does not apply (`{ source, name, format, page, ppi }`) |
 
 The endpoint mirrors `TypstCompileTool`'s `action: "render"` path: it
 materialises an inline `text/x-typst` parent row in the playground
@@ -173,6 +181,21 @@ pool (so the natural-key on `media_derivatives` is well-defined),
 runs the same `TypstRenderProducer`, persists through
 `MediaDerivativeService::create()`, and returns the canonical asset
 URL.
+
+An SVG format is refused by that persistence step unless the operator
+has enabled `SPORA_MEDIA_ARCHIVE_ALLOW_ACTIVE_TYPES` (off by default):
+a browser parses an SVG as a document that can carry script, so the
+format sits behind an operator toggle rather than in a static
+allowlist. The refusal comes from core's derivative service, not from
+this plugin — it reports `The producer emitted "image/svg+xml", which
+the operator has not permitted. Enable "Allow HTML and SVG" in the
+media settings to allow it.`, and the compile endpoint answers 422
+(`PERSISTENCE_FAILED`). That refusal needs the first spora-core
+release that carries it
+([spora-core#315](https://github.com/spora-ai/spora-core/pull/315));
+on an earlier core the SVG derivative is created instead of refused.
+`/preview` writes no derivative row, so it returns an SVG whatever the
+operator's setting is.
 
 The `name` field is **optional** for inline `source` — when omitted, the
 tool auto-generates a unique `inline-YYYYMMDD-HHMMSS-XXXX.typ` so the LLM

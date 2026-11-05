@@ -16,6 +16,8 @@ use Spora\Services\LocalAssetStore;
 use Spora\Services\MediaArchive\MediaAssetReader;
 
 beforeEach(function () {
+    isolatePluginStorage();
+
     $paths = new Paths(sys_get_temp_dir());
     $this->worldFactory = new TypstWorldFactory($paths);
 
@@ -106,9 +108,7 @@ function seedMediaAsset(int $userId, string $mime, string $bytes, string $filena
 }
 
 afterEach(function () {
-    // Best-effort cleanup — the principal dir is per-user, so the
-    // storage dir itself stays under BASE_PATH/storage; nothing
-    // to remove there.
+    releasePluginStorage();
 });
 
 describe('kind discriminator', function (): void {

@@ -12,6 +12,14 @@ use Spora\Plugins\Typst\Producers\TypstRenderProducer;
 use Spora\Plugins\Typst\Services\TypstResourcePaths;
 use Spora\Plugins\Typst\Services\TypstWorldFactory;
 
+beforeEach(function (): void {
+    isolatePluginStorage();
+});
+
+afterEach(function (): void {
+    releasePluginStorage();
+});
+
 describe('TypstRenderProducer (compile path, requires ext-typst)', function (): void {
     beforeEach(function (): void {
         if (!extension_loaded('typst')) {
@@ -699,7 +707,8 @@ describe('TypstRenderProducer (no ext-typst required)', function (): void {
  * Write the bytes for a `local` storage_mode asset to disk at the
  * path the producer reads from — `<storage>/assets/<token>.<ext>`
  * where `<ext>` is derived from the source MIME. The path mirrors
- * {@see TypstRenderProducer::readLocalBytes()}.
+ * {@see TypstRenderProducer::readLocalBytes()}, which resolves it
+ * through the same `Paths::storage()` the producer uses.
  */
 function writeLocalAsset(string $token, string $mime, string $bytes): void
 {
@@ -707,8 +716,7 @@ function writeLocalAsset(string $token, string $mime, string $bytes): void
         PRODUCER_TYPST_MIME => 'typ',
         default => throw new InvalidArgumentException("unsupported mime for test: {$mime}"),
     };
-    $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
-    $dir = $base . '/storage/assets';
+    $dir = (new Paths(BASE_PATH))->storage('assets');
     if (!is_dir($dir) && !mkdir($dir, 0o755, true) && !is_dir($dir)) {
         throw new RuntimeException("failed to create {$dir}");
     }
@@ -724,6 +732,6 @@ function cleanupLocalAsset(string $token, string $mime): void
         PRODUCER_TYPST_MIME => 'typ',
         default => 'typ',
     };
-    $base = defined('BASE_PATH') ? BASE_PATH : dirname(__DIR__, 3);
-    @unlink("{$base}/storage/assets/{$token}.{$ext}");
+    $base = (new Paths(BASE_PATH))->storage('assets');
+    @unlink("{$base}/{$token}.{$ext}");
 }
