@@ -74,6 +74,8 @@ function makeDerivativeAsset(string $id, string $mime, string $ext): MediaAsset
 }
 
 beforeEach(function () {
+    isolatePluginStorage();
+
     MediaDerivativeProducerDiscovery::reset();
 
     $paths = new Paths(sys_get_temp_dir());
@@ -152,6 +154,7 @@ beforeEach(function () {
 
 afterEach(function () {
     M::close();
+    releasePluginStorage();
 });
 
 describe('action discriminator', function (): void {

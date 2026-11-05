@@ -22,6 +22,8 @@ use Symfony\Component\HttpFoundation\Request;
  * land in a place we control and can clean up afterwards.
  */
 beforeEach(function () {
+    isolatePluginStorage();
+
     $this->auth = bootAuthLayer();
     $userId = $this->auth->register('tester@example.com', 'Password1!', 'Tester');
     simulateLoggedInSession($userId, 'tester@example.com');
@@ -38,19 +40,7 @@ beforeEach(function () {
 
 afterEach(function () {
     clearSession();
-    if ($this->resourcePaths->principalDirectory()) {
-        $dir = $this->resourcePaths->principalDirectory();
-        if (is_dir($dir)) {
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::CHILD_FIRST,
-            );
-            foreach ($iterator as $file) {
-                $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
-            }
-            @rmdir($dir);
-        }
-    }
+    releasePluginStorage();
 });
 
 it('GET /typst/fonts lists skill-shipped fonts by default', function () {

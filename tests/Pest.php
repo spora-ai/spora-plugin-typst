@@ -90,6 +90,102 @@ function clearSession(): void
     $_SESSION = [];
 }
 
+/**
+ * Point the plugin's storage at a directory this test owns.
+ *
+ * The plugin resolves its storage through `Paths::storage()`, which
+ * honours `SPORA_STORAGE_DIR` on every call — the one knob that
+ * reaches the `Paths` instances the plugin builds for itself (the
+ * tools' `paths()`, the controllers' `paths()`, the producer's
+ * local-asset reader) and that a test cannot pass in.
+ *
+ * Without it every test in the suite resolves one shared tree: each
+ * parallel worker has its own database, so `ensureUserPrincipal()`
+ * hands out the same small ids in every worker, and the cleanup of
+ * one test deletes the files of another.
+ *
+ * @return string the root the plugin resolves to from now on
+ */
+function isolatePluginStorage(): string
+{
+    $state = $GLOBALS['__spora_typst_storage'] ?? null;
+    if (!is_array($state)) {
+        $state = ['previous' => getenv('SPORA_STORAGE_DIR'), 'roots' => []];
+    }
+
+    $root = sys_get_temp_dir() . '/spora-plugin-typst-storage-' . getmypid() . '-' . bin2hex(random_bytes(8));
+
+    $roots = $state['roots'] ?? [];
+    if (!is_array($roots)) {
+        $roots = [];
+    }
+    $roots[] = $root;
+
+    $state['roots'] = $roots;
+    $GLOBALS['__spora_typst_storage'] = $state;
+
+    putenv("SPORA_STORAGE_DIR={$root}");
+    $_ENV['SPORA_STORAGE_DIR']    = $root;
+    $_SERVER['SPORA_STORAGE_DIR'] = $root;
+
+    return $root;
+}
+
+/**
+ * Undo {@see isolatePluginStorage()}: restore the previous override and
+ * remove the trees the test wrote into. The trees are the test's own,
+ * so nothing outside them is ever deleted.
+ */
+function releasePluginStorage(): void
+{
+    $state = $GLOBALS['__spora_typst_storage'] ?? null;
+    unset($GLOBALS['__spora_typst_storage']);
+
+    if (!is_array($state)) {
+        return;
+    }
+
+    $previous = $state['previous'] ?? false;
+    if (is_string($previous) && $previous !== '') {
+        putenv("SPORA_STORAGE_DIR={$previous}");
+        $_ENV['SPORA_STORAGE_DIR']    = $previous;
+        $_SERVER['SPORA_STORAGE_DIR'] = $previous;
+    } else {
+        putenv('SPORA_STORAGE_DIR');
+        unset($_ENV['SPORA_STORAGE_DIR'], $_SERVER['SPORA_STORAGE_DIR']);
+    }
+
+    $roots = $state['roots'] ?? [];
+    if (!is_array($roots)) {
+        return;
+    }
+    foreach ($roots as $root) {
+        if (is_string($root)) {
+            removeDirectoryTree($root);
+        }
+    }
+}
+
+/**
+ * Delete a directory and everything under it. The suite only ever
+ * removes a tree it created itself.
+ */
+function removeDirectoryTree(string $dir): void
+{
+    if (!is_dir($dir)) {
+        return;
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::CHILD_FIRST,
+    );
+    foreach ($iterator as $file) {
+        $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
+    }
+    @rmdir($dir);
+}
+
 uses()
     ->beforeEach(function () {
         Database::resetBootState();

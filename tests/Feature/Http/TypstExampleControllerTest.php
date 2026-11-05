@@ -14,6 +14,8 @@ use Spora\Services\PrincipalService;
 use Symfony\Component\HttpFoundation\Request;
 
 beforeEach(function () {
+    isolatePluginStorage();
+
     $this->auth = bootAuthLayer();
     $userId = $this->auth->register('tester@example.com', 'Password1!', 'Tester');
     simulateLoggedInSession($userId, 'tester@example.com');
@@ -31,16 +33,7 @@ beforeEach(function () {
 
 afterEach(function () {
     clearSession();
-    if (is_dir($this->resourcePaths->principalDirectory())) {
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($this->resourcePaths->principalDirectory(), FilesystemIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::CHILD_FIRST,
-        );
-        foreach ($iterator as $file) {
-            $file->isDir() ? @rmdir($file->getPathname()) : @unlink($file->getPathname());
-        }
-        @rmdir($this->resourcePaths->principalDirectory());
-    }
+    releasePluginStorage();
 });
 
 it('GET /typst/examples lists the skill-shipped showcase.typ by default', function () {
