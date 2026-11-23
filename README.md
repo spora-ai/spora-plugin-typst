@@ -410,7 +410,7 @@ plugin loader automatically.
 
 Three parallel jobs (the standard Spora-plugin CI):
 
-- `test` — Pest (PHP 8.4 + 8.5 on `ubuntu-latest`).
+- `test` — Pest (PHP 8.4 + 8.5 + 8.6 on `ubuntu-latest`).
 - `static-analysis` — PHPStan level 5 (memory limit 512M).
 - `code-style` — `php-cs-fixer` dry-run.
 
